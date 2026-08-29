@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8" />
+<title>ShowMe overlay — S3 手動測試 fixture</title>
+<style>
+  body { font: 14px/1.5 system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; }
+  fieldset { margin-bottom: 1rem; }
+  pre { background: #111; color: #7fdc7f; padding: 1rem; overflow: auto; max-height: 50vh; }
+  button.run { font-size: 1rem; padding: 0.5rem 1rem; margin: 0.25rem 0.5rem 0.25rem 0; }
+  #alert-box { background: #fee; border: 1px solid #c33; padding: 0.5rem; }
+</style>
+</head>
+<body>
+<h1>ShowMe overlay — S3 手動測試</h1>
+<p>
+  不經過 Playwright / MCP，純開這個檔案在瀏覽器裡戳
+  <code>window.__showme.snapshot(n)</code>。<br />
+  <code>show / clear / done</code> 是 S4 待做，現在按了會在 console 印錯誤，正常。
+</p>
+
+<button class="run" id="run-1">呼叫 snapshot(1)</button>
+<button class="run" id="run-2">再塞 200 個 button 後呼叫 snapshot(2)（測 150 截斷）</button>
+<br />
+<button class="run" id="run-show">
+  示範 show()：對「純文字按鈕」畫箭頭（kind=click，點掉它或按 Next／I'm stuck 試試）
+</button>
+<button class="run" id="run-clear">clear()</button>
+<button class="run" id="run-done">done("✅ Done — you created a project")</button>
+
+<pre id="output">（還沒呼叫）</pre>
+<p id="emit-log" style="color:#555"></p>
+
+<hr />
+
+<h2>各種角色的假元素</h2>
+
+<fieldset>
+  <legend>button</legend>
+  <button>純文字按鈕</button>
+  <button aria-label="有 aria-label 的按鈕">被蓋掉的文字</button>
+  <button data-testid="submit-btn">帶 data-testid 的按鈕</button>
+  <input type="submit" value="input[type=submit]" />
+  <button disabled>disabled 按鈕（spec 沒說要濾掉，所以還是會列出）</button>
+</fieldset>
+
+<fieldset>
+  <legend>link</legend>
+  <a href="#foo">一般連結</a>
+  <a>沒有 href，不該被抓到</a>
+</fieldset>
+
+<fieldset>
+  <legend>textbox</legend>
+  <label for="f-name">姓名</label>
+  <input id="f-name" type="text" />
+
+  <br />
+  <input type="text" placeholder="只有 placeholder，沒 label" />
+
+  <br />
+  <input type="text" aria-label="aria-label 優先於 placeholder" placeholder="不該出現這個" />
+
+  <br />
+  <textarea placeholder="textarea 也算 textbox"></textarea>
+
+  <br />
+  <div contenteditable="true">contenteditable 也算 textbox</div>
+</fieldset>
+
+<fieldset>
+  <legend>checkbox / radio</legend>
+  <label><input type="checkbox" /> 我同意</label>
+  <label><input type="radio" name="r" /> 選項 A</label>
+  <label><input type="radio" name="r" /> 選項 B</label>
+</fieldset>
+
+<fieldset>
+  <legend>combobox</legend>
+  <select>
+    <option>一</option>
+    <option>二</option>
+  </select>
+</fieldset>
+
+<fieldset>
+  <legend>menuitem / tab</legend>
+  <div role="menuitem">選單項目</div>
+  <div role="tab">分頁 A</div>
+</fieldset>
+
+<fieldset>
+  <legend>heading / alert</legend>
+  <h2>這是一個 h2 標題</h2>
+  <div id="alert-box" role="alert">這是一個 alert 訊息</div>
+</fieldset>
+
+<fieldset>
+  <legend>不該被抓到的東西</legend>
+  <div>純文字 div，沒有互動角色</div>
+  <span>span 也不該出現</span>
+</fieldset>
+
+<!-- 載入的是「產物」overlay.js（跑 overlay/build.sh 產生），不是原始碼 overlay.src.js。
+     目前只實作了 snapshot()，show/observe 還沒 vendor 進 Driver.js -->
+<script src="../overlay.js"></script>
+<script>
+  var output = document.getElementById("output");
+
+  function render(label, result) {
+    output.textContent =
+      label +
+      "\n" +
+      "elements.length = " + result.elements.length +
+      "  truncated = " + result.truncated +
+      "\n\n" +
+      JSON.stringify(result.elements, null, 2);
+    console.log(label, result);
+  }
+
+  document.getElementById("run-1").addEventListener("click", function () {
+    render("snapshot(1)", window.__showme.snapshot(1));
+  });
+
+  document.getElementById("run-2").addEventListener("click", function () {
+    for (var i = 0; i < 200; i++) {
+      var b = document.createElement("button");
+      b.textContent = "extra-" + i;
+      document.body.appendChild(b);
+    }
+    render("snapshot(2)（塞了 200 個 button 之後）", window.__showme.snapshot(2));
+  });
+
+  // 不經過 Playwright／MCP：手動接一個假的 __showme_emit，讓你在畫面上看到
+  // 「使用者完成了這一步」的事件被送出來（真正的接收端是人員 A 的 expose_function）。
+  var emitLog = document.getElementById("emit-log");
+  window.__showme_emit = function (payload) {
+    console.log("[showme_emit]", payload);
+    emitLog.textContent = "__showme_emit(" + JSON.stringify(payload) + ")";
+  };
+
+  document.getElementById("run-show").addEventListener("click", function () {
+    var r = window.__showme.snapshot(1);
+    var target = r.elements.find(function (e) {
+      return e.name === "純文字按鈕";
+    });
+    if (!target) {
+      alert("找不到「純文字按鈕」，先按上面 snapshot(1) 那顆試試");
+      return;
+    }
+    window.__showme.show({
+      uid: target.uid,
+      instruction: "點這個按鈕試試看（或按 Next／I'm stuck）",
+      kind: "click",
+      index: 1,
+      total: 1,
+      expect: "",
+    });
+  });
+
+  document.getElementById("run-clear").addEventListener("click", function () {
+    window.__showme.clear();
+  });
+
+  document.getElementById("run-done").addEventListener("click", function () {
+    window.__showme.done("✅ Done — you created a project");
+  });
+</script>
+</body>
+</html>

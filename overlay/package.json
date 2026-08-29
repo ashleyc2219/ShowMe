@@ -1,0 +1,12 @@
+{
+  "name": "showme-overlay",
+  "private": true,
+  "description": "ShowMe overlay（人員 B 負責）：DOM 掃描、Driver.js 高亮、完成判定、emit。詳見 docs/design/showme.md §12。",
+  "scripts": {
+    "test": "node --test",
+    "build": "./build.sh"
+  },
+  "devDependencies": {
+    "jsdom": "^29.1.1"
+  }
+}

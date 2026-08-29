@@ -553,6 +553,14 @@ Open question 1–2（SHOWING 時 inspect／end、覆蓋 start 時卡住的 show
 3. **「隱藏」的像素級定義**  
    規格只說隱藏。第 11 節 **design** 給了最小集合；若 demo 用 `opacity:0` 而未移除，可能漏判 → 人按 Next。
 
+4. **白名單角色選到「不是這個 app 的」元素**  
+   來源：人員 B 拿 `sample-app/finefoods-antd`（[docs/sample-app.md](../sample-app.md)，非活動當天 demo-app，只是拿一個真實 antd 站對 `snapshot()` 做 dry run）實測，2026-08-29。  
+   實測發現兩種情況，第 10 節白名單目前**沒有**排除機制：  
+   a) 頁面內嵌第三方 widget（該例是 Google Maps JS API，直接渲染進主文件 DOM、不是 iframe）時，widget 自己的控制項（Zoom in、Rotate map、Keyboard shortcuts…）也合法符合白名單角色，同一頁 67 個元素裡佔了 23 個（34%），排擠掉真正跟教學目標有關的元素、也可能被 AI 誤選。  
+   b) 巢狀選單（例如 antd `<li role="menuitem"><a href>…</a></li>`）內外兩層都符合白名單，同一個可點擊區域被列成兩個不同 uid、同名字，AI 不知道該選哪個。  
+   影響：W 層（snapshot walker）；不影響 T／S。  
+   決策：**先不修**，記錄成 open question——活動當天 demo-app 的 create-project 流程很可能根本不會經過會撞到這兩種情況的頁面。真的撞到再處理，不要現在為了沒發生的情境改白名單邏輯。
+
 沒有其他新發現的產品歧義。非法 kind、signal、testid、timeout 相等、Event 主鍵、banner、空 goal 均已 clarified，不重問。
 
 ---
