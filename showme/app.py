@@ -37,6 +37,12 @@ from showme.session import (
 
 BrowserFactory = Callable[[], BrowserLike]
 
+# A16 在 finefoods-antd 上實測：page.goto 回來時 SPA 可能還沒 render 完，
+# 第一拍會是 0 筆。拍到空清單就等一下再拍，最多 SNAPSHOT_RETRIES 次；
+# 重拍沿用同一個 snapshot#（規格：每「產生一次 snapshot」才 +1，重拍不算）。
+SNAPSHOT_RETRIES = 3
+SNAPSHOT_RETRY_DELAY_S = 0.5
+
 
 class ShowMeApp:
     def __init__(self, browser_factory: BrowserFactory = PlaywrightBrowser) -> None:
@@ -73,7 +79,11 @@ class ShowMeApp:
         """世代 +1 → 請瀏覽器掃一次 → 組成 Page → 存進 session.latest_page。"""
         browser = await self._ensure_browser()
         session.snapshot_no += 1
-        raw = await browser.snapshot(session.snapshot_no)
+        for attempt in range(SNAPSHOT_RETRIES):
+            raw = await browser.snapshot(session.snapshot_no)
+            if raw.get("elements") or attempt == SNAPSHOT_RETRIES - 1:
+                break
+            await asyncio.sleep(SNAPSHOT_RETRY_DELAY_S)
         page = build_page(raw, await browser.current_url(), await browser.title())
         session.latest_page = page
         return page

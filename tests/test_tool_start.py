@@ -330,3 +330,50 @@ async def test_restart_ends_the_blocked_show_step_as_timeout(started):
     assert second["session_id"] == session_id
     assert app.store.current().state is State.READY
     assert app.store.current().steps_shown == 0
+
+
+# ---- A16 彩排實測補的：SPA 還沒 render 完時第一拍會是空清單 ----
+
+
+async def test_start_tutorial_retries_the_snapshot_when_the_page_has_not_rendered_yet(monkeypatch):
+    """A16 在 finefoods-antd 上實測：goto 回來時 React 還沒畫完，snapshot 拍到 0 筆。
+    _take_snapshot 拍到空清單時要等一下再拍（最多 SNAPSHOT_RETRIES 次），
+    而且 snapshot# 只加一次（重拍用同一個 n）。"""
+    import showme.app as app_module
+
+    monkeypatch.setattr(app_module, "SNAPSHOT_RETRY_DELAY_S", 0)
+    browser = make_dashboard_browser()
+    app = ShowMeApp(browser_factory=lambda: browser)
+    real_snapshot = browser.snapshot
+    seen: list[int] = []
+
+    async def flaky_snapshot(n: int) -> dict:
+        seen.append(n)
+        if len(seen) == 1:
+            return {"elements": [], "truncated": False}
+        return await real_snapshot(n)
+
+    monkeypatch.setattr(browser, "snapshot", flaky_snapshot)
+
+    result = await app.start_tutorial(DASHBOARD_URL, "create a project")
+
+    assert result["error"] == ""
+    assert [e["uid"] for e in result["page"]["elements"]] == ["s1-1", "s1-2"]
+    assert seen == [1, 1]  # 重拍用同一個世代
+    assert app.store.current().snapshot_no == 1
+
+
+async def test_start_tutorial_gives_up_after_the_retry_budget_and_returns_an_empty_page(monkeypatch):
+    """真的整頁沒有任何符合白名單的元素時，不能卡住：拍滿次數就回空清單。"""
+    import showme.app as app_module
+
+    monkeypatch.setattr(app_module, "SNAPSHOT_RETRY_DELAY_S", 0)
+    browser = FakeBrowser()  # 沒 add_page → snapshot 永遠是空的
+    app = ShowMeApp(browser_factory=lambda: browser)
+
+    result = await app.start_tutorial("http://localhost:3000/empty", "anything")
+
+    assert result["error"] == ""
+    assert result["page"]["elements"] == []
+    assert browser.calls.count(("snapshot", 1)) == app_module.SNAPSHOT_RETRIES
+    assert app.store.current().snapshot_no == 1

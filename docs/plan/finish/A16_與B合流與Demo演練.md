@@ -218,6 +218,17 @@ uv run pytest -m browser -q
 8 passed in 6.71s
 ```
 
+**2026-08-29 實測** ✅：
+
+```text
+......................                                              [100%]
+22 passed, 147 deselected in 35.12s
+```
+
+全套 `uv run pytest -q` 也一起跑了：**169 passed in 29.88s**、0 skipped。
+A05 用的是 B 的真 overlay，一樣綠 → 接縫的兩個檢查點（reload 後 `window.__showme` 還在、
+頁面 emit Python 收得到）都成立，可以往下走 1-2。
+
 `tests/test_browser_js.py`（A06）與 `tests/test_e2e_fake_overlay.py`（A15）用的是 `tests/fixtures/fake_overlay.js`，**不會**因為 B 的檔案改動而變色——這是刻意的：它們是 A 側的迴歸網，讓你在 B 的 overlay 壞掉時仍然知道「Python 這一半是好的」。
 
 > 如果 A05 紅了、A06/A15 綠：問題在 B 的 overlay 或接縫，往下走 1-2。
@@ -288,6 +299,44 @@ grep -n "timeout\|off_script\|__showme_emit" overlay/overlay.js
 
 預期：只在「發 emit」的地方看到 `__showme_emit`，而且**看不到** `timeout` 或 `off_script` 被當成 emit 的 kind。
 
+##### 2026-08-29 實測（真 overlay + finefoods-antd :3000）
+
+驗證方式：scratchpad 的 async 腳本用 `PlaywrightBrowser()` 打 `http://localhost:3000`，
+headless 與 headed 各跑一次（結果相同），`page.on("console", ...)` 全程收訊息。
+第 12 項用 `grep`。**14 項全過（14/14 ✅），沒有一項要退回給 B。**
+
+| # | 結果 | 證據 |
+|---|---|---|
+| 1 | ✅ | `snapshot(1)` 回的 keys = `['elements', 'truncated']`，`truncated=False` |
+| 2 | ✅ | 67 筆元素，每筆 keys 都是 `['name', 'role', 'testid', 'uid']`，異常 0 筆 |
+| 3 | ✅ | 67/67 筆 `testid == ""`（finefoods 整站沒用 `data-testid`），型別全是 `str`，沒有 `None`／缺鍵。例：`{'uid': 's1-1', 'role': 'link', 'name': '', 'testid': ''}` |
+| 4 | ✅ | 有 8 筆 `name == ""` 仍被列出（側邊欄 logo 連結 `s1-1`、header 的 icon-only 按鈕 `s1-17` 等） |
+| 5 | ✅ | `snapshot(1)` 前三筆 = `s1-1 / s1-2 / s1-3`；`snapshot(2)` 全部變 `s2-*`（前三筆 `s2-1 / s2-2 / s2-3`）。n 由 Python 傳、B 只組字串 |
+| 6 | ✅ | `document.querySelectorAll("[data-showme-uid]").length` = 67，與 `elements` 筆數一致 |
+| 7 | ✅ | finefoods 每頁都不到 150（`/` 67、`/products` 58、`/orders` 53、`/customers` 53），`truncated` 都是 `False`——與頁面白名單候選數完全相等。為了真的踩到上限，另外在頁面臨時注入 200 顆 `<button>` 再拍：**`count=150`、`truncated=True`、最後一筆 uid `s2-150`**（注入的 probe 節點事後移除，沒有動 `sample-app/`） |
+| 8 | ✅ | `show({uid, instruction, kind, index, total, expect})` 六鍵傳進去，`.driver-popover` 出現，標題是 `Step 1 / 4` |
+| 9 | ✅ | popover 的 `innerText` = `"Step 1 / 4\nClick Products in the sidebar\nNext\nI'm stuck"`——說明、`Step k / N`、`Next`、`I'm stuck` 四樣齊 |
+| 10 | ✅ | 用 `set_emit_handler` 收：點 Next → 恰好一筆 `{'kind': 'step_done', 'url': ..., 'ts': ..., 'signal': 'next_button', 'uid': 's2-9'}`；點 I'm stuck → 恰好一筆 `{'kind': 'stuck', ..., 'signal': 'stuck_button', 'uid': 's3-5'}` |
+| 11 | ✅ | 用 `evaluate` 對同一顆 Next 按鈕同步 `click()` 兩次 → **只收到 1 筆** emit（overlay 自己的 `current.emitted` guard 擋掉第二筆，不是靠 A 的 `pending.done()` 兜底） |
+| 12 | ✅ | `grep -n "timeout\|off_script" overlay/overlay.js` **完全沒有輸出**（連字串都沒出現）。timeout 是 Python 的責任、`off_script` 是 Non-Goal，B 都沒碰 |
+| 13 | ✅ | `clear()` 之後 `typeof window.__showme === "object"`，且 `.driver-popover` 確實消失 |
+| 14 | ✅ | `done("XYZ-test")` 之後 `document.body.innerText` 含 `XYZ-test`——文案來自 Python，B 沒寫死 |
+
+實測順帶發現的兩件事（不是接縫錯，是 demo 要知道的）：
+
+1. **`start_tutorial` 剛回來時 `page.elements` 可能是 0 筆。** finefoods-antd 是 SPA，
+   `page.goto` 的 load 事件比 React render 早。彩排時第一次 `start_tutorial` 回的就是
+   `元素數 = 0`，等 2 秒再 `inspect_page` 就變成 44–67 筆。
+   → demo 時 agent 的第一個動作最好是 `inspect_page` 再挑 uid（§9 排錯表本來就有這一列）。
+   → **彩排後已修（2026-08-29）**：`showme/app.py` 的 `_take_snapshot` 拍到空清單會等 0.5 秒重拍、最多 3 次、
+   snapshot# 不重複加（`SNAPSHOT_RETRIES` / `SNAPSHOT_RETRY_DELAY_S`），測試在 `tests/test_tool_start.py` 末尾兩條。
+   所以現在 `start_tutorial` 通常直接就有元素；agent 先 `inspect_page` 仍然無害。
+2. **finefoods-antd 整站沒有 `role == "textbox"`。** header 的搜尋框雖然是 `<input type="search">`，
+   但 antd 的 AutoComplete 在上面掛了 `role="combobox"`，overlay 的 `roleOf()` 顯性 role 優先，
+   所以它被歸成 combobox。`kind="input"` 的完成判定看的是元素本身的 `blur`／`change` + `value` 非空，
+   跟 role 無關，所以**照樣可用**（彩排第 2 步就是拿它做的，成功回 `step_done`）。
+   → demo 要示範 `kind="input"` 時，uid 從 `role == "combobox"` 且 name 含 `Search` 的那筆挑。
+
 #### 1-3　Driver.js 被 CSP 擋的症狀（A 要認得，但修是 B 的事）
 
 **A 這邊看到的症狀：** `show_step` 一切正常——它乖乖卡住等待、沒有丟例外、`error` 是 `""`——**但是畫面上什麼都沒有**。人不知道要點哪裡，於是一路等到 timeout。
@@ -303,11 +352,29 @@ violates the following Content Security Policy directive: "script-src 'self' …
 
 **A 要做的事：** 只有「認出症狀、告訴 B」。不要自己去改 `overlay/**`。
 
+##### 2026-08-29 實測：**沒有 CSP 問題** ✅
+
+三次跑（seam 腳本 headless／headed、完整彩排 headed）都用 `page.on("console", ...)` 全程收訊息，
+**沒有任何一則含 `Refused to load` 或 `Content Security Policy`**。原因很明確：
+`overlay/overlay.js` 是 `overlay/build.sh` 把 `overlay.src.js` + `vendor/driver.iife.js` +
+`vendor/driver.css`（內嵌成 `__SHOWME_DRIVER_CSS__` 字串）串成的**單一 517 行 bundle**，
+執行期完全不去 CDN 拉東西——也就是設計 §12 說的「改成本地 vendor 檔」那條路，B 一開始就走了。
+
+console 裡確實有紅字，但**全部是示範站自己的**，跟 ShowMe 無關，不用理：
+
+```text
+Warning: [antd: Menu] `children` is deprecated. Please use `items` instead.
+Warning: [antd: Dropdown] `overlay` is deprecated. Please use `menu` instead.
+Google Maps JavaScript API error: BillingNotEnabledMapError
+Warning: Instance created by `useForm` is not connected to any Form element.
+Maximum update depth exceeded.（在搜尋框打字後 refine 自己刷出來的）
+```
+
 #### 1-4　合流完成的判準
 
-- [ ] `uv run pytest -q` 全套全綠（包含用 B 的 overlay 的 A05）。
-- [ ] 1-2 的 14 項全部確認過。
-- [ ] 在示範站上手動跑一次 REPL，箭頭出得來、popover 四樣齊、clear 與 done 都對。
+- [x] `uv run pytest -q` 全套全綠（包含用 B 的 overlay 的 A05）。→ 2026-08-29 實測 **169 passed in 29.88s**、0 skipped；`uv run pytest -m browser -q` 為 **22 passed, 147 deselected in 35.12s**。
+- [x] 1-2 的 14 項全部確認過。→ **14/14 ✅**（表在上面）。
+- [x] 在示範站上手動跑一次 REPL，箭頭出得來、popover 四樣齊、clear 與 done 都對。→ 改用 scratchpad 腳本跑（headless + headed 各一次），箭頭、`Step 1 / 4`、`Next`、`I'm stuck`、`clear()`、`done("XYZ-test")` 全部正確。
 
 ---
 
@@ -362,6 +429,23 @@ uv run python scripts/dev_open.py http://localhost:3000
 | 視窗彈出、頁面正常 | ✅ 過了 | 往下走 |
 | 視窗彈出但頁面空白／`ERR_CONNECTION_REFUSED` | 示範站沒在跑，或 port 不對 | 回 Step 2 確認 `npm run dev` 還活著、port 對不對 |
 | 沒有視窗，終端機丟 `Executable doesn't exist` | Chromium 沒裝、Chrome channel 也找不到 | `uv run playwright install chromium` |
+
+#### 2026-08-29 實測（Step 2 + Step 3）
+
+示範站已經在跑（不重跑 `setup-sample-app.sh`、不重 `npm install`）：
+
+```text
+$ curl -s -o /dev/null -w "%{http_code}" http://localhost:3000
+200
+
+$ uv run python scripts/dev_open.py http://localhost:3000
+opened : http://localhost:3000/
+title  : Finefoods Ant Design Admin Panel - refine
+視窗會停留 10 秒，請用眼睛確認畫面。
+（exit code 0，沒有 traceback）
+```
+
+✅ headed Chrome 彈得出來、載得到示範站、`channel="chrome"` 走的是本機 Google Chrome。
 
 ---
 
@@ -432,13 +516,52 @@ uv run python scripts/dev_open.py http://localhost:3000
 彩排時把實際看到的東西記下來（下一步要用）：
 
 ```text
-示範站實際 port           : ______
-start_tutorial 回的元素數  : ______   truncated: ______
-Products 那一項的 uid      : ______
-一次 show_step 從呼叫到畫出箭頭的秒數 : ______
-Qoder Request Timeout 實測 : 預設 ______ 秒 / 已調高到 ______ 秒
-demo 時要用的 timeout_s    : ______
+示範站實際 port           : 3000
+start_tutorial 回的元素數  : 0（剛回來時）→ 等 2 秒 inspect_page 後 67   truncated: false
+Products 那一項的 uid      : s2-9（第二份 snapshot 的第 9 筆；每場次都要現挑，別背這個數字）
+一次 show_step 從呼叫到畫出箭頭的秒數 : 0.02–0.04 秒
+Qoder Request Timeout 實測 : 預設 ____ 秒 / 已調高到 ____ 秒   ← 待使用者在 Qoder IDE 量測
+demo 時要用的 timeout_s    : ____   ← 待使用者決定（要小於上面那個數字）
 ```
+
+#### 2026-08-29 程式化彩排實測
+
+彩排方式：不經過 Qoder，直接用 `ShowMeApp()`（**預設 factory**，也就是產品路徑：
+真 overlay + `channel="chrome"` 的 **headed** Chrome）在 scratchpad 腳本裡依序呼叫四個 tool，
+`show_step` 放進 `asyncio.create_task` 讓它真的阻塞，然後用 `page.click` / `page.fill`
+模擬「人」的動作。走的就是 Qoder 會走的那條路，只是把「人」換成腳本。
+
+> ⚠ **全程沒有按任何 Save／Create／Submit／Delete。** finefoods-antd 的資料後端是外部公開 API，
+> 彩排只做：側邊欄導航、搜尋框打字後 blur、按 popover 的 Next／I'm stuck、什麼都不做等 timeout。
+> 所以 §7 Step 4-2 劇本裡的第 8–9 步（Click Save）**沒有**在彩排裡跑，demo 現場也建議跳過或換成 Cancel。
+
+| # | 動作 | 回傳 event | `elapsed_s` | 其他數字 |
+|---|---|---|---|---|
+| 1 | `start_tutorial("http://localhost:3000", "create a product")` | — | 呼叫到回來 **1.9 秒**（另一次 3.2 秒） | `session_id='s_17d4'`、`error=''`、`page.elements` **0 筆**、`truncated=false` |
+| 1b | 等 2 秒 → `inspect_page` | — | — | **67 筆**、`truncated=false`、uid 世代 `s2-*`；Products = `s2-9` |
+| 2 | `show_step(s2-9, "Click Products in the sidebar", "click", 1, 4, timeout_s=30)` | （卡住） | — | 呼叫 → `.driver-popover` 出現 **0.02 秒**；popover 文字 `"Step 1 / 4\nClick Products in the sidebar\nNext\nI'm stuck"`；`task.done() == False` |
+| 3 | `page.click('[data-showme-uid="s2-9"]')`（模擬人） | **`step_done`** | 0.1 | `error=''`、新 page **67 筆**、uid 變 `s3-*`、`url=http://localhost:3000/products` |
+| 4 | `show_step(s4-18, "Type something in the search box", **"input"**, 2, 4, timeout_s=30)` | （卡住） | — | 畫出箭頭 0.02 秒。⚠ 這個 uid 的 `role` 是 `combobox` 不是 `textbox`（見 §7 1-2 實測發現 2），`tagName === "INPUT"` |
+| 5 | `page.fill(...)` 打 `chicken` 再 `blur()` | **`step_done`** | 0.0 | `error=''`。**沒有送出表單** |
+| 6 | `show_step(s6-5 Orders, "click", 3, 4, timeout_s=30)` → 按 **I'm stuck** | **`stuck`** | 0.1 | `steps_shown` 2 → **3** |
+| 7 | 同一個元素、從新 page 重挑 uid（`s7-5`）再 `show_step` | （卡住後按 Next → `step_done`） | — | `steps_shown` 3 → **4**（證實「stuck 後重畫也算一步」） |
+| 8 | `show_step(Customers, "click", 4, 4, timeout_s=5)`，**什麼都不做** | **`timeout`** | **5.0** | `error=''`（timeout 是 event 不是 error）、`.driver-popover` 已消失（A-3 的 `clear()` 有跑） |
+| 9 | `end_tutorial(session_id, "create a product")` | — | — | `ok=True`、`error=''`、`document.body.innerText` 含 **`✅ Done — you created a project`** |
+| 10 | 再 `end_tutorial(同一個 session_id)` | — | — | `ok=False`、`error='session_not_found'` |
+| 11 | `await app.shutdown()` | — | — | 正常關閉，沒有 traceback |
+
+彩排結論：**四個 tool 全部走過、含一次 input、一次 stuck、一次 timeout，全程 Python 沒有替人按任何送出類按鈕。**
+
+彩排時的 checklist 對照：
+
+- [x] 四個 tool 都真的被呼叫到，順序是 `start_tutorial` → `show_step` ×5 → `end_tutorial`。
+- [x] 至少有一步是 `kind="input"`（第 4–5 步）。
+- [x] 故意按一次 **I'm stuck**，`event: "stuck"` 回來、同元素重畫時 `steps_shown` +1。
+- [x] 故意讓一步 timeout（用 `timeout_s=5`），`event: "timeout"`、`error` 是 `""`、箭頭被清掉、後面還能接著走。
+- [x] 最後 banner 真的出現。
+- [x] 再 `end_tutorial` 得到 `session_not_found`。
+- [x] 全程沒有替人點過任何東西（`page.click` 是「扮演人」，不是 agent 代點；agent 側只呼叫四個 tool）。
+- [ ] 從「打開終端機」到「Chrome 出現 finefoods-antd」不超過 2 分鐘 → **待使用者**（程式化彩排量不到「人開終端機」這段；`start_tutorial` 本身是 1.9–3.2 秒）。
 
 ---
 
@@ -446,42 +569,44 @@ demo 時要用的 timeout_s    : ______
 
 前一天做完，當天只需要「開機、啟動、講」。
 
+> 2026-08-29 已由 agent 驗過的項目直接打勾並附數字；**需要 Qoder IDE 或現場環境的一律標「待使用者」，沒有打勾。**
+
 **環境**
 
-- [ ] `uv run pytest -q` 全套全綠、0 skipped。
-- [ ] `git status` 乾淨（沒有沒 commit 的改動）。
-- [ ] `sample-app/finefoods-antd/` 已經 `npm install` 好（當天不要現場裝）。
-- [ ] `npm run dev` 起得來，`http://localhost:3000` 打得開。
-- [ ] `uv run python scripts/dev_open.py http://localhost:3000` 能彈出 headed Chrome。
-- [ ] `uv run showme` 能啟動（`Ctrl-C` 結束）。
+- [x] `uv run pytest -q` 全套全綠、0 skipped。→ **169 passed in 29.88s**
+- [x] `git status` 乾淨（沒有沒 commit 的改動）。→ `showme/`、`tests/`、`overlay/` 一行都沒動；工作區只剩使用者自己既有的未追蹤／已修改檔（`CLAUDE.md`、`docs/plan/dev-prompts/phase0829*.md`、`docs/sample-app.md`、`scripts/setup-sample-app.sh`、A16 的 TODO），加上本篇要 commit 的 A16 文件與 REP。
+- [x] `sample-app/finefoods-antd/` 已經 `npm install` 好（當天不要現場裝）。→ 本次全程沒重跑 `setup-sample-app.sh`、沒 `npm install`
+- [x] `npm run dev` 起得來，`http://localhost:3000` 打得開。→ `curl` 回 **200**，title `Finefoods Ant Design Admin Panel - refine`
+- [x] `uv run python scripts/dev_open.py http://localhost:3000` 能彈出 headed Chrome。→ exit 0、視窗有出來
+- [x] `uv run showme` 能啟動（`Ctrl-C` 結束）。→ `uv run showme < /dev/null` 乾淨啟動並在 stdin EOF 時 **exit 0**
 
-**Qoder**
+**Qoder**（全部**待使用者**，agent 碰不到 IDE）
 
-- [ ] MCP 設定裡 `showme` 在、四個 tool 列得出來。
-- [ ] allow list 有 `mcp__showme__*`，實測不會每次跳確認。
-- [ ] Request Timeout 已調高：實測 ______ 秒。
-- [ ] demo 用的 `timeout_s` 決定好：______ 秒（要小於上面那個數字）。
+- [ ] MCP 設定裡 `showme` 在、四個 tool 列得出來。　**待使用者**
+- [ ] allow list 有 `mcp__showme__*`，實測不會每次跳確認。　**待使用者**
+- [ ] Request Timeout 已調高：實測 ______ 秒。　**待使用者**
+- [ ] demo 用的 `timeout_s` 決定好：______ 秒（要小於上面那個數字）。　**待使用者**
 
 **Overlay（B 的部分，A 只確認）**
 
-- [ ] `overlay/overlay.js` 不是 stub。
-- [ ] `uv run pytest -m browser -q` 全綠。
-- [ ] Step 1-2 的 14 項都確認過。
-- [ ] Driver.js 沒有被 CSP 擋（console 沒紅字）。
+- [x] `overlay/overlay.js` 不是 stub。→ **517 行 / 46 KB**，開頭寫著 `GENERATED FILE — 由 overlay/build.sh 產生`，Driver.js 與 driver.css 都已 vendor 進 bundle
+- [x] `uv run pytest -m browser -q` 全綠。→ **22 passed, 147 deselected in 35.12s**
+- [x] Step 1-2 的 14 項都確認過。→ **14/14 ✅**
+- [x] Driver.js 沒有被 CSP 擋（console 沒紅字）。→ 三次跑都 **0 則** `Refused to load`／CSP 訊息（bundle 不走 CDN）
 
-**現場**
+**現場**（全部**待使用者**）
 
-- [ ] 螢幕解析度／縮放調好，Qoder 與 Chrome 左右並排都看得清楚。
-- [ ] Chrome 沒有登入其他帳號、沒有一堆分頁、沒有擋畫面的擴充功能。
-- [ ] 通知全關（Chrome、系統、Slack）。
-- [ ] 螢幕不會自動休眠。
-- [ ] 網路：示範站是 localhost，**不需要網路**；但 Qoder 的模型需要，確認連得上。
-- [ ] 電源接著。
+- [ ] 螢幕解析度／縮放調好，Qoder 與 Chrome 左右並排都看得清楚。　**待使用者**
+- [ ] Chrome 沒有登入其他帳號、沒有一堆分頁、沒有擋畫面的擴充功能。　**待使用者**
+- [ ] 通知全關（Chrome、系統、Slack）。　**待使用者**
+- [ ] 螢幕不會自動休眠。　**待使用者**
+- [ ] 網路：示範站是 localhost，**不需要網路**；但 Qoder 的模型需要，確認連得上。　**待使用者**
+- [ ] 電源接著。　**待使用者**
 
-**備案**
+**備案**（**待使用者**）
 
-- [ ] 彩排的錄影或截圖存好（現場真的爆掉就放這個）。
-- [ ] 知道 §9 故障排除表在哪一頁。
+- [ ] 彩排的錄影或截圖存好（現場真的爆掉就放這個）。　**待使用者**
+- [ ] 知道 §9 故障排除表在哪一頁。　**待使用者**
 
 ---
 
@@ -564,29 +689,29 @@ git mv docs/plan/unfinish/A*.md docs/plan/finish/ && git commit -m "docs: move t
 
 **合流**
 
-- [ ] `overlay/overlay.js` 是 B 的真檔案（不是 10 行 stub）。
-- [ ] `uv run pytest -q` 全套全綠、0 skipped，其中 A05 的 `test_browser_inject.py` 用的是 B 的 overlay。
-- [ ] §7 Step 1-2 的 14 項接縫全部親眼確認過。
-- [ ] Driver.js 沒被 CSP 擋（Chrome console 沒有 `Refused to load the script` 紅字）；有的話已告知 B。
+- [x] `overlay/overlay.js` 是 B 的真檔案（不是 10 行 stub）。→ 517 行 bundle
+- [x] `uv run pytest -q` 全套全綠、0 skipped，其中 A05 的 `test_browser_inject.py` 用的是 B 的 overlay。→ **169 passed**
+- [x] §7 Step 1-2 的 14 項接縫全部親眼確認過。→ **14/14 ✅**（headless + headed 各跑一次）
+- [x] Driver.js 沒被 CSP 擋（Chrome console 沒有 `Refused to load the script` 紅字）；有的話已告知 B。→ **0 則**，不需要告知 B
 
 **示範站**
 
-- [ ] `sample-app/finefoods-antd/` 建好、`npm run dev` 跑得起來。
-- [ ] `uv run python scripts/dev_open.py http://localhost:3000` 能彈出 headed Chrome 並看到示範站。
+- [x] `sample-app/finefoods-antd/` 建好、`npm run dev` 跑得起來。→ `curl` 回 200（本次沒重裝、沒重跑腳本）
+- [x] `uv run python scripts/dev_open.py http://localhost:3000` 能彈出 headed Chrome 並看到示範站。→ exit 0
 
 **Demo**
 
-- [ ] 彩排完整跑過一次：`start_tutorial` → `show_step` ×N（含一次 input、一次 stuck、一次 timeout）→ `end_tutorial` → 再 `end_tutorial` 得 `session_not_found`。
-- [ ] 全程 agent 沒有替人操作。
-- [ ] 完成 banner 真的出現，文字是 `✅ Done — you created a project`。
-- [ ] §7 Step 5 的六個實測數字都填了。
-- [ ] §7 Step 6 的 checklist 全部打勾。
+- [x] 彩排完整跑過一次：`start_tutorial` → `show_step` ×N（含一次 input、一次 stuck、一次 timeout）→ `end_tutorial` → 再 `end_tutorial` 得 `session_not_found`。→ 程式化彩排（`ShowMeApp()` 預設 factory、headed Chrome）跑完 11 步，見 §7 Step 5 實測表
+- [x] 全程 agent 沒有替人操作。→ Python 只呼叫四個 tool；`page.click` / `page.fill` 是腳本「扮演人」，且沒碰任何送出類按鈕
+- [x] 完成 banner 真的出現，文字是 `✅ Done — you created a project`。
+- [x] §7 Step 5 的六個實測數字都填了。→ 四個填實測值；**Qoder Request Timeout 與 demo 用的 `timeout_s` 兩格待使用者在 Qoder IDE 量測**
+- [ ] §7 Step 6 的 checklist 全部打勾。→ 環境與 Overlay 兩段**全勾**；**Qoder／現場／備案三段待使用者**
 
 **收尾**
 
-- [ ] §7 Step 7 的七項 A 側設計決定，你講得出「這是我們決定的，不是規格」。
-- [ ] A00–A16 都搬到 `docs/plan/finish/`，`docs/plan/unfinish/` 是空的。
-- [ ] `showme/**`、`tests/**`、`overlay/**` 在本篇一行都沒改。
+- [ ] §7 Step 7 的七項 A 側設計決定，你講得出「這是我們決定的，不是規格」。　**待使用者**（表本身不用改）
+- [ ] A00–A16 都搬到 `docs/plan/finish/`，`docs/plan/unfinish/` 是空的。→ Step 8 由主控執行
+- [x] `showme/**`、`tests/**`、`overlay/**` 在本篇一行都沒改。→ `git status` 確認三個目錄乾淨
 
 ---
 
