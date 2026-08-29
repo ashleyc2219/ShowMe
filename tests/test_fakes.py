@@ -216,8 +216,6 @@ async def test_shutdown_without_browser_does_nothing(app):
 @pytest.mark.parametrize(
     "call",
     [
-        lambda app: app.start_tutorial("http://localhost:3000/", "create a project"),
-        lambda app: app.inspect_page("s_8f2a"),
         lambda app: app.show_step("s_8f2a", "s1-1", "Click New Project", "click", 1, 4),
         lambda app: app.end_tutorial("s_8f2a", "done"),
     ],

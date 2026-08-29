@@ -77,7 +77,7 @@ app.start_tutorial(new_url, new_goal)
 - [ ] `showme/app.py` 的 `start_tutorial` 目前長這樣（A08 的成果）：
 
 ```python
-    async def start_tutorial(self, url: str, goal: str) -> dict:
+    async def start_tutorial(self, url: str, goal: str) -> dict[str, object]:
         browser = await self._ensure_browser()
         try:
             await browser.open(url)
@@ -186,7 +186,7 @@ class FakeBrowser:
 ### 6.2 提供（給後面幾篇）
 
 ```python
-async def start_tutorial(self, url: str, goal: str) -> dict
+async def start_tutorial(self, url: str, goal: str) -> dict[str, object]
 # 沒有 Session：新建（A08）
 # 有 Session：同 session_id、覆寫 goal、clear() 舊 overlay、開新 url、
 #             steps_shown=0、snapshot_no 從 0 重算（拍完是 1）、state=READY、pending=None、latest_page=None
@@ -355,7 +355,7 @@ E        +  where 's_3c71' = <dict>['session_id']
 把 `showme/app.py` 的 `start_tutorial` 整個換成：
 
 ```python
-    async def start_tutorial(self, url: str, goal: str) -> dict:
+    async def start_tutorial(self, url: str, goal: str) -> dict[str, object]:
         browser = await self._ensure_browser()
         session = self.store.current()
         try:
@@ -443,7 +443,7 @@ E        +  where 0 = <built-in method count of list object>(('clear',))
 把 `showme/app.py` 的 `start_tutorial` 整個換成（只多了中間那個 `if session is not None:` 區塊）：
 
 ```python
-    async def start_tutorial(self, url: str, goal: str) -> dict:
+    async def start_tutorial(self, url: str, goal: str) -> dict[str, object]:
         browser = await self._ensure_browser()
         session = self.store.current()
         if session is not None:
@@ -625,7 +625,7 @@ E        +  where False = <bound method Future.done of <Future pending>>()
 把 `showme/app.py` 的 `start_tutorial` 整個換成最終版（只在 `if session is not None:` 裡多了叫醒那三行）：
 
 ```python
-    async def start_tutorial(self, url: str, goal: str) -> dict:
+    async def start_tutorial(self, url: str, goal: str) -> dict[str, object]:
         browser = await self._ensure_browser()
         session = self.store.current()
         if session is not None:
@@ -758,7 +758,7 @@ uv run pytest -m "not browser" -q
 預期最後一行類似：
 
 ```text
-54 passed, 1 skipped in 0.62s
+93 passed, 1 skipped, 18 deselected in 0.68s
 ```
 
 ```bash

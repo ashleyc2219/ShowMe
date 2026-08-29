@@ -81,10 +81,60 @@ class ShowMeApp:
     # ---- 四個 MCP tool（A08–A13 逐一實作）----
 
     async def start_tutorial(self, url: str, goal: str) -> dict[str, object]:
-        return {"error": "not_implemented"}
+        browser = await self._ensure_browser()
+        session = self.store.current()
+        if session is not None:
+            # OQ2（A 的設計決定，可改）：覆蓋時若有一次 show_step 正卡著等使用者，
+            # 用 "cancelled" 把它的信箱解掉；那一次 show_step 會回 event="timeout"、page=None。
+            pending = session.pending
+            if session.state is State.SHOWING and pending is not None and not pending.done():
+                pending.set_result({"kind": "cancelled", "url": "", "ts": 0})
+            # 舊場次的箭頭還在畫面上，先擦掉再開新頁。這是善後動作，
+            # 就算頁面已經跳走、overlay 不在了也不該擋住新的教學，所以吞掉例外。
+            try:
+                await browser.clear()
+            except Exception:
+                pass
+        try:
+            await browser.open(url)
+        except NavigationFailed:
+            # A 的設計決定（可改）：開不了頁就不留下 Session，回傳空的 session_id。
+            self.store.delete()
+            return {
+                "session_id": "",
+                "goal": goal,
+                "page": None,
+                "next_action": "",
+                "error": "navigation_failed",
+            }
+        if session is None:
+            session = self.store.create(goal)
+        else:
+            session.goal = goal
+            session.state = State.READY
+            session.steps_shown = 0
+            session.snapshot_no = 0
+            session.pending = None
+            session.latest_page = None
+        page = await self._take_snapshot(session)
+        return {
+            "session_id": session.session_id,
+            "goal": session.goal,
+            "page": page,
+            "next_action": START_NEXT_ACTION,
+            "error": "",
+        }
 
     async def inspect_page(self, session_id: str) -> dict[str, object]:
-        return {"error": "not_implemented"}
+        session = self.store.get(session_id)
+        if session is None:
+            return {"page": None, "error": "session_not_found"}
+        if session.state is State.SHOWING:
+            # OQ1（A 的設計決定，可改）：已定案的六個錯誤碼裡沒有 not_ready，
+            # 所以 SHOWING 時的 inspect 沿用 show_step_in_progress，不新增錯誤碼。
+            return {"page": None, "error": "show_step_in_progress"}
+        page = await self._take_snapshot(session)
+        return {"page": page, "error": ""}
 
     async def show_step(
         self,

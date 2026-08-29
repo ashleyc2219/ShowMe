@@ -84,6 +84,7 @@ inspect_page(session_id)
 |---|---|---|
 | 修改 | `showme/app.py` | 只改 `ShowMeApp.inspect_page()`。其他方法一律不動。 |
 | 新增 | `tests/test_tool_inspect.py` | `inspect_page` 的行為測試（不開瀏覽器）。 |
+| 修改 | `tests/test_fakes.py` | 只刪掉最後那個 parametrize 裡 `inspect_page` 那一行（它已經不是佔位了）。 |
 
 ---
 
@@ -134,7 +135,7 @@ class FakeBrowser:
 ### 6.2 提供（給後面幾篇）
 
 ```python
-async def inspect_page(self, session_id: str) -> dict
+async def inspect_page(self, session_id: str) -> dict[str, object]
 # 成功：{"page": {...}, "error": ""}
 # 失敗：{"page": None,  "error": "session_not_found"}        沒有場次或 id 對不上
 #      {"page": None,  "error": "show_step_in_progress"}    state 是 SHOWING（OQ1，可改）
@@ -197,12 +198,12 @@ uv run pytest tests/test_tool_inspect.py -q
 預期紅燈，重點行是：
 
 ```text
-E       KeyError: 'page'
+E       AssertionError: assert 'not_implemented' == 'session_not_found'
 ...
-2 failed in 0.09s
+2 failed in 0.03s
 ```
 
-（A07 的佔位只回 `{"error": "not_implemented"}`，沒有 `page` 這個鍵。）
+（A07 的佔位只回 `{"error": "not_implemented"}`：`error` 的值不對，而且連 `page` 這個鍵都沒有。）
 
 ---
 
@@ -211,7 +212,7 @@ E       KeyError: 'page'
 打開 `showme/app.py`，把 `inspect_page` 整個換掉：
 
 ```python
-    async def inspect_page(self, session_id: str) -> dict:
+    async def inspect_page(self, session_id: str) -> dict[str, object]:
         session = self.store.get(session_id)
         if session is None:
             return {"page": None, "error": "session_not_found"}
@@ -408,7 +409,7 @@ E       AssertionError: assert '' == 'show_step_in_progress'
 把 `showme/app.py` 的 `inspect_page` 整個換成最終版：
 
 ```python
-    async def inspect_page(self, session_id: str) -> dict:
+    async def inspect_page(self, session_id: str) -> dict[str, object]:
         session = self.store.get(session_id)
         if session is None:
             return {"page": None, "error": "session_not_found"}
@@ -447,11 +448,11 @@ uv run pytest -m "not browser" -q
 預期最後一行類似：
 
 ```text
-63 passed, 1 skipped in 0.70s
+101 passed, 1 skipped, 18 deselected in 0.62s
 ```
 
 ```bash
-git add showme/app.py tests/test_tool_inspect.py
+git add showme/app.py tests/test_tool_inspect.py tests/test_fakes.py
 git commit -m "feat: inspect_page re-snapshots the page without drawing"
 ```
 

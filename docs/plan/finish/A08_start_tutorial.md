@@ -94,7 +94,7 @@ uv run pytest -m "not browser" -q
 預期輸出最後一行類似（數字會因為你前面寫了幾條測試而不同）：
 
 ```text
-34 passed in 0.42s
+74 passed, 18 deselected in 0.58s
 ```
 
 如果這裡不是全綠，**先回去修 A01–A07，不要往下做**。
@@ -123,6 +123,7 @@ uv run pytest -m "not browser" -q
 |---|---|---|
 | 修改 | `showme/app.py` | 只改 `ShowMeApp.start_tutorial()` 一個方法。其他方法一律不動。 |
 | 新增 | `tests/test_tool_start.py` | `start_tutorial` 的行為測試（不開瀏覽器）。A09 會在同一個檔案後面繼續加測試。 |
+| 修改 | `tests/test_fakes.py` | 只刪掉最後那個 parametrize 裡 `start_tutorial` 那一行（它已經不是佔位了）。 |
 
 **不要動**：`showme/server.py`、`showme/session.py`、`showme/rules.py`、`showme/browser.py`、`tests/fakes.py`、`tests/conftest.py`、`overlay/**`。
 
@@ -229,7 +230,7 @@ started       # 已呼叫 await app.start_tutorial("http://localhost:3000/", "cr
 ### 6.2 提供（給後面幾篇）
 
 ```python
-async def start_tutorial(self, url: str, goal: str) -> dict
+async def start_tutorial(self, url: str, goal: str) -> dict[str, object]
 # 成功：{"session_id": str, "goal": str, "page": dict, "next_action": START_NEXT_ACTION, "error": ""}
 # 失敗：{"session_id": "",  "goal": str, "page": None, "next_action": "",                "error": "navigation_failed"}
 ```
@@ -299,7 +300,7 @@ E       KeyError: 'goal'
 打開 `showme/app.py`，把 `start_tutorial` 整個換掉：
 
 ```python
-    async def start_tutorial(self, url: str, goal: str) -> dict:
+    async def start_tutorial(self, url: str, goal: str) -> dict[str, object]:
         browser = await self._ensure_browser()
         await browser.open(url)
         session = self.store.create(goal)
@@ -527,7 +528,7 @@ E       showme.browser.NavigationFailed: cannot open http://localhost:1/
 把 `showme/app.py` 的 `start_tutorial` 整個換成這一版：
 
 ```python
-    async def start_tutorial(self, url: str, goal: str) -> dict:
+    async def start_tutorial(self, url: str, goal: str) -> dict[str, object]:
         browser = await self._ensure_browser()
         try:
             await browser.open(url)
@@ -654,7 +655,7 @@ uv run pytest -m "not browser" -q
 預期最後一行類似：
 
 ```text
-45 passed in 0.55s
+84 passed, 18 deselected in 0.58s
 ```
 
 只把這一篇動到的兩個檔加進 commit：
@@ -684,7 +685,7 @@ git commit -m "feat: start_tutorial opens the url and returns the first snapshot
 - [ ] 程式裡沒有任何 host 檢查、沒有 `goal.strip()`、沒有 `if not goal`。
 - [ ] `start_tutorial` 沒有呼叫 `browser.show()`（第一次 start 不畫任何箭頭）。
 - [ ] `inspect_page`、`show_step`、`end_tutorial` 三個方法還是原封不動的佔位。
-- [ ] commit 只包含 `showme/app.py` 與 `tests/test_tool_start.py`。
+- [ ] commit 只包含 `showme/app.py`、`tests/test_tool_start.py` 與 `tests/test_fakes.py`（刪掉 `start_tutorial` 那一行佔位測試）。
 
 ---
 
