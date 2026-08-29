@@ -105,7 +105,8 @@ A01–A11 都已完成並且測試全綠。逐項打勾：
 - [ ] `showme/app.py` 的 `show_step` 已經有 A11 的**前置 6 道檢查**；通過檢查之後目前是暫時回 `{"error": "not_implemented"}` 的佔位。
 - [ ] `tests/fakes.py` 的 `FakeBrowser` 有 `emit(kind, url=None, ts=0)`、`navigate(url)`、`add_page(url, title, elements, truncated=False)`，並且會把每次呼叫記進 `self.calls`。
 - [ ] `tests/conftest.py` 有 `anyio_backend`、`fake_browser`、`app`、`started` 四個 fixture。
-- [ ] `tests/test_tool_start.py` 裡有一個標了 `@pytest.mark.skip(reason="A12 完成 show_step 後打開")` 的 OQ2 測試——**本篇最後一步就是把它打開**。
+- [ ] `tests/test_tool_start.py` 裡有一個標了 `@pytest.mark.skip(reason="A12 完成 show_step 阻塞等待後打開")` 的 OQ2 測試——**本篇最後一步就是把它打開**。
+- [ ] `tests/test_fakes.py` 末尾 parametrize 的 `show_step` 那一行**已經在 A11 刪掉了**（A11 一實作前置檢查，`show_step` 就不再回裸的 `{"error": "not_implemented"}`），本篇不用再動這個檔。
 
 用這兩行確認最後兩點：
 
@@ -118,10 +119,9 @@ grep -n "A12" tests/test_tool_start.py
 預期輸出（數字會依你前幾篇寫了幾個測試而不同）：
 
 ```text
-........................................                      [100%]
-40 passed in 0.6s
+115 passed, 1 skipped, 18 deselected in 0.10s
 
-98:    @pytest.mark.skip(reason="A12 完成 show_step 後打開")
+309:@pytest.mark.skip(reason="A12 完成 show_step 阻塞等待後打開")
 ```
 
 ---
@@ -231,7 +231,7 @@ def _on_emit(self, event: dict) -> None:
 ```python
 async def show_step(self, session_id: str, uid: str, instruction: str, kind: str,
                     step_index: int, step_total: int, expect_text: str = "",
-                    timeout_s: float = DEFAULT_TIMEOUT_S) -> dict: ...
+                    timeout_s: float = DEFAULT_TIMEOUT_S) -> dict[str, object]: ...
 ```
 
 回傳形狀（六個鍵**永遠都在**）：
@@ -581,7 +581,7 @@ uv run pytest tests/test_tool_show_step_wait.py -q
 預期會看到一整排 `F`，訊息大致像這樣（依 A11 佔位的寫法會是 `KeyError` 或 `AssertionError` 其中一種）：
 
 ```text
-FFFFFFFFFF                                                          [100%]
+FFFFFFFFFFF                                                         [100%]
 =================================== FAILURES ===================================
 ____ test_after_drawing_state_is_showing_and_steps_shown_increased _____
 >       assert session.state is State.SHOWING
@@ -590,7 +590,7 @@ E       AssertionError: assert <State.READY: 'READY'> is <State.SHOWING: 'SHOWIN
 ____________ test_step_done_returns_fresh_page_and_goes_back_to_ready __________
 >       assert result["event"] == "step_done"
 E       KeyError: 'event'
-10 failed in 0.4s
+11 failed in 0.41s
 ```
 
 **紅得對**：現在 `show_step` 通過前置檢查後直接回佔位，既沒把 state 改成 SHOWING，也沒有 `event` 這個鍵。
@@ -610,7 +610,7 @@ E       KeyError: 'event'
         step_total: int,
         expect_text: str = "",
         timeout_s: float = DEFAULT_TIMEOUT_S,
-    ) -> dict:
+    ) -> dict[str, object]:
         """對一個 uid 畫 overlay，然後阻塞等到 overlay emit 或 timeout_s 到期。
 
         回傳永遠有六個鍵：event / signal / elapsed_s / page / next_action / error。
@@ -724,8 +724,8 @@ uv run pytest tests/test_tool_show_step_wait.py -q
 預期輸出：
 
 ```text
-..........                                                          [100%]
-10 passed in 0.9s
+...........                                                         [100%]
+11 passed in 0.53s
 ```
 
 （會花將近 1 秒是因為兩個 timeout 測試真的等了 0.2 / 0.3 秒。）
@@ -745,7 +745,7 @@ ________________ test_show_step_with_eleven_steps_passes_the_pre_checks ________
 >       assert result["error"] == "not_implemented"   # 六關都過了（A12 會換成真的等待）
 E       AssertionError: assert '' == 'not_implemented'
 ...
-4 failed, 51 passed, 1 skipped in 2.1s
+4 failed, 123 passed in 1.5s
 ```
 
 **紅得對。** A11 那四條測試斷言的是「六道檢查全過之後回 `not_implemented` 佔位」——那個佔位剛剛被 Step 2 換掉了，現在會真的畫、真的等 0.2 秒、然後回 `event="timeout"`、`error=""`。A11 文件末尾的「給 A12 的交代」就是在交代這件事，**Step 5 會把這四條改好**。
@@ -760,7 +760,7 @@ uv run pytest tests/test_tool_show_step_checks.py -q
 
 ```text
 .....F..F.F.......F                                                 [100%]
-4 failed, 11 passed in 1.2s
+4 failed, 11 passed in 0.89s
 ```
 
 如果紅的不只那四條、或紅的名字不在下面 Step 5 的清單裡，代表 Step 2 把前置檢查改壞了——回去比對一次那六道檢查。
@@ -905,7 +905,7 @@ uv run pytest tests/test_tool_show_step_checks.py -q
 
 ```text
 ...............                                                     [100%]
-15 passed in 1.1s
+15 passed in 0.87s
 ```
 
 > **為什麼結果是 `timeout` 而不是 `step_done`？** 因為這四條測試只是要證明「六道檢查沒有把它擋下來」，它們**沒有**去 emit 任何事件。既然沒人 emit，等 0.2 秒之後 Python 這邊的計時器就到期，回 `event="timeout"`、`error=""`。「畫出來之後真的等到 emit」的行為由本篇的 `tests/test_tool_show_step_wait.py` 負責驗。
@@ -957,8 +957,8 @@ uv run pytest tests/test_tool_start.py -q
 預期：全綠、**0 skipped**。
 
 ```text
-............                                                        [100%]
-12 passed in 0.3s
+.....................                                               [100%]
+21 passed in 0.08s
 ```
 
 ### Step 7：全部再跑一次，然後 commit
@@ -970,8 +970,8 @@ uv run pytest -m "not browser" -q
 預期：全綠、**0 failed、0 skipped**。
 
 ```text
-..........................................................          [100%]
-58 passed in 2.3s
+.......................................................             [100%]
+127 passed in 1.5s
 ```
 
 （測試總數會依你前幾篇寫了幾個而不同；重點是 `failed` 與 `skipped` 都是 0。）
@@ -986,7 +986,7 @@ git commit -m "feat: block show_step until overlay emits or timeout_s elapses"
 
 ## 8. 驗收清單
 
-- [ ] `uv run pytest tests/test_tool_show_step_wait.py -q` → 10 passed。
+- [ ] `uv run pytest tests/test_tool_show_step_wait.py -q` → 11 passed。
 - [ ] `uv run pytest tests/test_tool_show_step_checks.py -q` → **15 passed**（A11 的 4 條佔位斷言已在 Step 5 換成 `error == ""` + `event == "timeout"`；另外 11 條原封不動繼續綠）。
 - [ ] `uv run pytest -m "not browser" -q` → 全綠，**0 failed、0 skipped**（A09 的 OQ2 測試已在 Step 6 打開）。
 - [ ] 畫出後：`session.state is State.SHOWING`、`session.steps_shown` 加 1、`fake.calls` 出現 `("show", opts)`，且 `opts` 的鍵恰好是 `uid / instruction / kind / index / total / expect`。
@@ -1036,6 +1036,7 @@ git commit -m "feat: block show_step until overlay emits or timeout_s elapses"
 | `features/顯示步驟.feature` | Rule：完成判定只看 event，signal 可為空且不列入驗收 | 回傳固定 `"signal": ""`；測試只斷言 `event` |
 | `features/顯示步驟.feature` | Rule：elapsed_s 大於等於 timeout_s 時 event 為 timeout 且狀態為 READY（含「完成訊號與截止同一瞬間仍為 timeout」） | `if event is None or elapsed >= timeout_s:`；`test_timeout_clears_the_overlay_and_still_returns_a_page`、`test_emit_that_arrives_after_the_deadline_is_still_timeout` |
 | `features/顯示步驟.feature` | Rule：每步恰好回傳一次事件；同一 session 同一 ts 後至的事件丟棄（Example：同 ts 第二筆不取代第一筆） | `_on_emit` 的 `pending.done()` 守門；`test_only_the_first_emit_counts` |
+| `overlay/overlay.js`（B 已進 repo） | 真 overlay 的 emit payload 是 `{kind, url, ts, signal}`，比接縫多一個 `signal` 鍵 | `_on_emit` 與 `show_step` 都只讀 `kind`，多出來的鍵直接忽略；回傳的 `signal` 一律是 `""` |
 | `features/顯示步驟.feature` | Rule：同一 session 並發的 show_step 被拒絕且錯誤為 show_step_in_progress | 前置檢查 2；`test_second_show_step_while_showing_is_rejected` |
 | `features/顯示步驟.feature` | Rule：任何 kind 使用者按 I'm stuck 時 event 為 stuck | `result_event = event["kind"]`；`test_stuck_returns_event_stuck` |
 | `features/顯示步驟.feature` | Rule：操作失敗時寫在回傳的 error，不丟例外 | 全部路徑 `return dict`，沒有 `raise` |

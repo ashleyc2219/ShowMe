@@ -306,7 +306,6 @@ async def test_restart_resolves_a_pending_future_with_cancelled(started):
 
 
 # A 的設計決定（可改）：OQ2 —— 被覆蓋的那次 show_step 回 event="timeout"、page=None、error=""
-@pytest.mark.skip(reason="A12 完成 show_step 阻塞等待後打開")
 async def test_restart_ends_the_blocked_show_step_as_timeout(started):
     app, fake, first = started
     session_id = first["session_id"]

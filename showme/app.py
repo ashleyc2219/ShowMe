@@ -147,10 +147,95 @@ class ShowMeApp:
         expect_text: str = "",
         timeout_s: float = DEFAULT_TIMEOUT_S,
     ) -> dict[str, object]:
-        return {"error": "not_implemented"}
+        """對一個 uid 畫 overlay，然後阻塞等到 overlay emit 或 timeout_s 到期。
+
+        回傳永遠有六個鍵：event / signal / elapsed_s / page / next_action / error。
+        失敗寫在 error，不丟例外（MCP 呼叫本身仍算成功）。
+        """
+        # ---------- 前置檢查（A11；每一項都不畫、不加 steps_shown） ----------
+        session = self.store.get(session_id)
+        if session is None:
+            return {"event": "", "signal": "", "elapsed_s": 0.0, "page": None,
+                    "next_action": "", "error": "session_not_found"}
+        if session.state is State.SHOWING:
+            return {"event": "", "signal": "", "elapsed_s": 0.0, "page": None,
+                    "next_action": "", "error": "show_step_in_progress"}
+        if session.steps_shown >= MAX_STEPS:
+            return {"event": "", "signal": "", "elapsed_s": 0.0, "page": None,
+                    "next_action": "", "error": "max_steps_exceeded"}
+        kind = normalize_kind(kind)
+        if expect_text_missing(kind, expect_text):
+            return {"event": "", "signal": "", "elapsed_s": 0.0, "page": None,
+                    "next_action": "", "error": "expect_text_required"}
+        if not uid_in_page(uid, session.latest_page):
+            # 不畫、steps_shown 不加，但要附一份新鮮 page（snapshot# +1）讓 agent 重挑 uid。
+            page = await self._take_snapshot(session)
+            return {"event": "", "signal": "", "elapsed_s": 0.0, "page": page,
+                    "next_action": "", "error": "uid_not_in_snapshot"}
+        timeout_s = normalize_timeout_s(timeout_s)
+
+        # ---------- 畫（A12） ----------
+        browser = await self._ensure_browser()
+        loop = asyncio.get_running_loop()
+        session.pending = loop.create_future()
+        session.state = State.SHOWING
+        session.steps_shown += 1
+        await browser.show({
+            "uid": uid,
+            "instruction": instruction,
+            "kind": kind,
+            "index": step_index,
+            "total": step_total,
+            "expect": expect_text or "",
+        })
+
+        # ---------- 等（A12） ----------
+        started = loop.time()
+        try:
+            event = await asyncio.wait_for(asyncio.shield(session.pending), timeout=timeout_s)
+        except asyncio.TimeoutError:
+            event = None
+        elapsed = loop.time() - started
+
+        # 被 start_tutorial 覆蓋掉了（A 的設計決定 OQ2，可改）：
+        # 這一次不再碰瀏覽器、也不再碰 Session，因為 start_tutorial 已經接手重設了。
+        if event is not None and event.get("kind") == "cancelled":
+            return {"event": "timeout", "signal": "", "elapsed_s": round(elapsed, 1),
+                    "page": None, "next_action": "", "error": ""}
+
+        if event is None or elapsed >= timeout_s:
+            result_event = "timeout"
+            await browser.clear()          # A 的設計決定 A-3：只有 timeout 才主動清
+        else:
+            result_event = event["kind"]   # "step_done" 或 "stuck"
+
+        # ---------- 收尾（A12） ----------
+        session.pending = None
+        session.state = State.READY
+        page = await self._take_snapshot(session)
+        return {"event": result_event, "signal": "", "elapsed_s": round(elapsed, 1),
+                "page": page, "next_action": STEP_NEXT_ACTION, "error": ""}
 
     async def end_tutorial(self, session_id: str, summary: str) -> dict[str, object]:
-        return {"error": "not_implemented"}
+        """清掉 overlay、貼上固定的完成 banner、刪掉 Session。
+
+        summary 只是給呼叫端自己記錄用的，規格明訂它不影響 banner 文案，
+        所以這裡刻意完全不使用它。瀏覽器不關（A 的設計決定 A-2，可改）：
+        人要留在畫面上看到那句 ✅。
+        """
+        session = self.store.get(session_id)
+        if session is None:
+            return {"ok": False, "error": "session_not_found"}
+
+        # OQ1（A 的設計決定，可改）：正在等人做事就不准收攤，重用既有的錯誤碼。
+        if session.state is State.SHOWING:
+            return {"ok": False, "error": "show_step_in_progress"}
+
+        browser = await self._ensure_browser()
+        await browser.clear()
+        await browser.done(DONE_BANNER_TEXT)
+        self.store.delete()
+        return {"ok": True, "error": ""}
 
     # ---- 收尾 ----
 

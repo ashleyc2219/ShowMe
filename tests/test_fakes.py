@@ -212,14 +212,3 @@ async def test_shutdown_closes_the_browser(app, fake_browser):
 async def test_shutdown_without_browser_does_nothing(app):
     await app.shutdown()   # 不該丟例外
 
-
-@pytest.mark.parametrize(
-    "call",
-    [
-        lambda app: app.show_step("s_8f2a", "s1-1", "Click New Project", "click", 1, 4),
-        lambda app: app.end_tutorial("s_8f2a", "done"),
-    ],
-)
-async def test_tool_methods_are_placeholders_for_now(app, call):
-    """A08–A13 會一個一個換掉；換掉之後這個測試會被那一篇刪掉對應的那一行。"""
-    assert await call(app) == {"error": "not_implemented"}

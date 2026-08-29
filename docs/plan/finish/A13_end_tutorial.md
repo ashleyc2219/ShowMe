@@ -128,6 +128,7 @@ uv run python -c "from showme.session import DONE_BANNER_TEXT; print(repr(DONE_B
 |---|---|---|
 | 新增（測試） | `tests/test_tool_end.py` | 本篇全部的行為測試 |
 | 修改 | `showme/app.py` | 把 `end_tutorial` 的佔位換成真的實作 |
+| 修改 | `tests/test_fakes.py` | 刪掉最後那個 `test_tool_methods_are_placeholders_for_now`（parametrize 只剩 `end_tutorial` 一行，本篇實作後就沒有案例了，空的 parametrize 沒意義，整個測試函數拿掉） |
 
 **不會動到：** `overlay/**`、`showme/server.py`（薄殼在 A07 就寫好了，簽名沒變）、`showme/session.py`、`showme/rules.py`、`showme/browser.py`。
 
@@ -167,7 +168,7 @@ async def _ensure_browser(self) -> BrowserLike: ...
 ### 6.2 提供（給後面幾篇）
 
 ```python
-async def end_tutorial(self, session_id: str, summary: str) -> dict: ...
+async def end_tutorial(self, session_id: str, summary: str) -> dict[str, object]: ...
 ```
 
 回傳形狀（兩個鍵**永遠都在**）：
@@ -182,7 +183,7 @@ async def end_tutorial(self, session_id: str, summary: str) -> dict: ...
 
 ```python
 @mcp.tool()
-async def end_tutorial(session_id: str, summary: str) -> dict:
+async def end_tutorial(session_id: str, summary: str) -> dict[str, object]:
     """Clear the overlay, show the fixed done banner, and delete the session."""
     return await get_app().end_tutorial(session_id, summary)
 ```
@@ -402,7 +403,7 @@ E       AssertionError: assert [('open', 'http://localhost:3000/'), ('snapshot',
 打開 `showme/app.py`，把 `end_tutorial` 換成這一份：
 
 ```python
-    async def end_tutorial(self, session_id: str, summary: str) -> dict:
+    async def end_tutorial(self, session_id: str, summary: str) -> dict[str, object]:
         """清掉 overlay、貼上固定的完成 banner、刪掉 Session。
 
         summary 只是給呼叫端自己記錄用的，規格明訂它不影響 banner 文案，
@@ -454,7 +455,7 @@ uv run pytest tests/test_tool_end.py -q
 
 ```text
 ...........                                                         [100%]
-11 passed in 0.2s
+11 passed in 0.02s
 ```
 
 再跑一次全部不開瀏覽器的測試：
@@ -463,7 +464,17 @@ uv run pytest tests/test_tool_end.py -q
 uv run pytest -m "not browser" -q
 ```
 
-預期：全綠、0 skipped。
+預期：全綠、0 skipped（數字會依 A14 的契約測試有沒有一起進來而不同）。
+
+```text
+147 passed, 18 deselected in 1.58s
+```
+
+順手確認佔位真的清空了（沒有輸出就對了）：
+
+```bash
+grep -rn not_implemented showme/
+```
 
 ### Step 4：用一次「完整走完一輪」確認手感（可選，2 分鐘）
 
@@ -518,7 +529,7 @@ calls : [('open', 'http://localhost:3000/'), ('snapshot', 1), ('show', {...}), (
 ### Step 5：commit
 
 ```bash
-git add showme/app.py tests/test_tool_end.py
+git add showme/app.py tests/test_tool_end.py tests/test_fakes.py
 git commit -m "feat: end_tutorial clears overlay, shows the fixed banner, deletes the session"
 ```
 
@@ -539,6 +550,7 @@ git commit -m "feat: end_tutorial clears overlay, shows the fixed banner, delete
 - [ ] SHOWING 時呼叫 → `show_step_in_progress`，Session 沒被刪、banner 沒貼（OQ1，A 的設計決定，可改）。
 - [ ] `fake.calls` 裡**沒有** `("close",)`，`fake.alive` 仍是 `True`（A-2，可改）。
 - [ ] `end_tutorial` 之後再 `start_tutorial` → `error == ""`、有新的 Session、`state is State.READY`、`steps_shown == 0`、`snapshot_no == 1`、page 的 uid 是 `s1-*`。
+- [ ] `tests/test_fakes.py` 的 `test_tool_methods_are_placeholders_for_now` 已整個刪掉；`grep -rn not_implemented showme/` 沒有輸出。
 - [ ] 沒有動到 `overlay/**` 與 `showme/server.py`。
 
 ---

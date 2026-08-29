@@ -96,6 +96,7 @@ show_step(session_id, uid, instruction, kind, step_index, step_total, expect_tex
 |---|---|---|
 | 修改 | `showme/app.py` | 只改 `ShowMeApp.show_step()`。其他方法一律不動。 |
 | 新增 | `tests/test_tool_show_step_checks.py` | `show_step` 六道前置檢查的測試（不開瀏覽器）。A12 的等待測試會另外開 `tests/test_tool_show_step_wait.py`。 |
+| 修改 | `tests/test_fakes.py` | 只刪一行：末尾 parametrize 的 `show_step` 佔位案例。實作後 `show_step` 不再回裸 `{"error": "not_implemented"}`（六個鍵都在），那條佔位測試在**本篇**就過期了，不是 A12。 |
 
 ---
 
@@ -144,7 +145,7 @@ async def _take_snapshot(self, session: Session) -> dict:
 ```python
 async def show_step(self, session_id: str, uid: str, instruction: str, kind: str,
                     step_index: int, step_total: int, expect_text: str = "",
-                    timeout_s: float = DEFAULT_TIMEOUT_S) -> dict
+                    timeout_s: float = DEFAULT_TIMEOUT_S) -> dict[str, object]
 # 失敗（六道前置檢查）：
 #   {"event": "", "signal": "", "elapsed_s": 0.0,
 #    "page": <uid_not_in_snapshot 時是新鮮 page，其他一律 None>,
@@ -284,7 +285,7 @@ E       AssertionError: assert 'not_implemented' == 'session_not_found'
 ```python
     async def show_step(self, session_id: str, uid: str, instruction: str, kind: str,
                         step_index: int, step_total: int, expect_text: str = "",
-                        timeout_s: float = DEFAULT_TIMEOUT_S) -> dict:
+                        timeout_s: float = DEFAULT_TIMEOUT_S) -> dict[str, object]:
         session = self.store.get(session_id)
         if session is None:
             return {"event": "", "signal": "", "elapsed_s": 0.0, "page": None,
@@ -400,7 +401,7 @@ E       AssertionError: assert 'not_implemented' == 'expect_text_required'
 ```python
     async def show_step(self, session_id: str, uid: str, instruction: str, kind: str,
                         step_index: int, step_total: int, expect_text: str = "",
-                        timeout_s: float = DEFAULT_TIMEOUT_S) -> dict:
+                        timeout_s: float = DEFAULT_TIMEOUT_S) -> dict[str, object]:
         session = self.store.get(session_id)
         if session is None:
             return {"event": "", "signal": "", "elapsed_s": 0.0, "page": None,
@@ -541,7 +542,7 @@ E       TypeError: 'NoneType' object is not subscriptable
 ```python
     async def show_step(self, session_id: str, uid: str, instruction: str, kind: str,
                         step_index: int, step_total: int, expect_text: str = "",
-                        timeout_s: float = DEFAULT_TIMEOUT_S) -> dict:
+                        timeout_s: float = DEFAULT_TIMEOUT_S) -> dict[str, object]:
         session = self.store.get(session_id)
         if session is None:
             return {"event": "", "signal": "", "elapsed_s": 0.0, "page": None,
@@ -595,11 +596,13 @@ uv run pytest -m "not browser" -q
 預期最後一行類似：
 
 ```text
-78 passed, 1 skipped in 0.85s
+115 passed, 1 skipped in 0.10s
 ```
 
+（`1 skipped` 是 A09 那條 OQ2 測試，A12 會打開。）
+
 ```bash
-git add showme/app.py tests/test_tool_show_step_checks.py
+git add showme/app.py tests/test_tool_show_step_checks.py tests/test_fakes.py
 git commit -m "feat: show_step pre-checks for session, state, steps, kind and uid"
 ```
 
@@ -640,6 +643,7 @@ A12 會把最後那個 `not_implemented` 佔位換成「畫箭頭 + 阻塞等待
 - [ ] `kind` 有被 `normalize_kind()` 洗過，而且洗過的值蓋掉了原本的參數。
 - [ ] `show_step` 目前**還沒有**呼叫 `browser.show()`、沒有動 `session.pending`、沒有把 state 設成 SHOWING（那是 A12）。
 - [ ] `end_tutorial` 還是佔位。
+- [ ] `tests/test_fakes.py` 末尾 parametrize 的 `show_step` 那一行已刪掉（剩 `end_tutorial` 一行，A13 再刪）。
 
 ---
 
