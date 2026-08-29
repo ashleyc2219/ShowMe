@@ -1,0 +1,149 @@
+// ShowMe 資料模型
+// 來源：docs/spec/draft/design-draft.md（v0.2）
+// 規則：只收規格寫明的欄位與約束；Session / 回傳物存在 process 記憶體，不是資料庫。
+
+Table Session {
+  session_id string [pk, note: '教學場次識別。規格舉例：s_8f2a。同一 ShowMe process 同一時間只有一個 Session 時，再次開始教學也不改號']
+  goal string [note: 'start_tutorial 傳入並記錄的目標。規格舉例：create a project。允許空字串；再次開始教學時覆寫為新目標']
+  state string [note: 'IDLE | READY | SHOWING。timeout 或 steps_shown 超過上限時回到 READY。end_tutorial 成功後刪除 Session，不保留 DONE']
+  steps_shown int [note: '已畫出的步驟數。uid 驗證通過並畫出時加 1，含 stuck 後對同一 uid 再畫。uid 驗證失敗不加。>= max_steps(12) 時 show_step 回 max_steps_exceeded。再次開始教學時歸零']
+
+  Note: '''
+  ShowMe server 端每個教學場次。規格寫明存在 process 記憶體。
+  同一 process 只允許一個 Session。
+  沒有 session_ttl 時間上限。
+  start_tutorial 不檢查 host 是否為 localhost；開不了頁才是 navigation_failed。
+  再次呼叫 start_tutorial（Session 仍在）：覆蓋 goal、開啟傳入的 url、session_id 不變、steps_shown 歸零、state 為 READY。
+  Session 已刪除後再 start_tutorial：新建 Session。
+  show_step 畫出 overlay 後阻塞，直到使用者做完或 timeout；MVP 不提供 wait_for_user。
+  硬限制（常數，非欄位）：max_steps = 12、step_timeout = 120 s。
+  規劃與 replan 不是 server 狀態。
+  工具與狀態：
+  - start_tutorial 任何時候都可呼叫（有 Session 則覆蓋，無則新建）
+  - inspect_page、show_step、end_tutorial 僅在 state 為 READY 時可成功
+  - SHOWING 只等待使用者完成或 timeout；此時 inspect_page / end_tutorial 操作失敗；第二個 show_step 的錯誤為 show_step_in_progress
+  - end_tutorial 成功後刪除 Session
+  - end_tutorial 的 summary 不影響完成 banner；文案固定為 ✅ Done — you created a project
+  - Session 不存在時 inspect_page、show_step、end_tutorial 的錯誤皆為 session_not_found
+  失敗不丟例外：寫在回傳的 error 欄，MCP 呼叫仍成功。
+  跨屬性不變條件：
+  - 同一時間最多一個 Session
+  - Session 仍在時再次 start_tutorial 不產生新的 session_id
+  - steps_shown >= 12 時不得再成功畫出新步驟
+  - 每次 uid 驗證通過並畫出時 steps_shown 加 1，含 stuck 後同一 uid 重畫
+  - 狀態轉換：無 Session -start_tutorial-> READY -show_step-> SHOWING -event-> READY；timeout / steps > max_steps 時 SHOWING -> READY；READY -end_tutorial-> 刪除
+  關聯：Session 1:1 最新 Page（latest_snapshot）；Session 1:N Event；Session 0..1 進行中 Step
+  '''
+}
+
+Table Page {
+  session_id string [pk, note: '所屬 session。規格只保存 latest_snapshot，故與 Session 1:1']
+  url string [note: '目前頁面 URL。規格舉例：http://localhost:3000/、http://localhost:3000/projects/new']
+  title string [note: '頁面標題。規格舉例：Dashboard、New Project']
+  truncated bool [note: '濃縮後是否截斷。符合條件的 node 超過 150 時為 true，少於等於 150 時為 false。true 時 agent 可用 inspect_page 再看']
+
+  Note: '''
+  ShowMe → agent 的濃縮 snapshot（§9.1）。
+  只保留互動角色（button、link、textbox、checkbox、radio、combobox、menuitem、tab）+ heading + alert。
+  硬上限 150：依 DOM 走訪順序取前 150，不分是否在 viewport。超過 150 則丟棄其餘且 truncated=true；少於等於 150 則 truncated=false。
+  每次產生 snapshot 時 uid 的 snapshot# 加一：start_tutorial 成功時從 1 起算（含覆蓋既有場次）；inspect_page 成功、show_step 回傳且附上 page 時（含 uid_not_in_snapshot）再加一。
+  關聯：Page 1:N PageElement
+  '''
+}
+
+Table PageElement {
+  session_id string [note: '所屬 Page / Session']
+  uid string [note: '格式 s{snapshot#}-{index}，帶 snapshot 世代。規格舉例：s1-4、s1-7、s2-3、s2-4、s2-h1。start_tutorial 成功為 s1；其後每次產生 snapshot 加一']
+  role string [note: 'a11y 角色。規格列出：button、link、textbox、checkbox、radio、combobox、menuitem、tab、heading、alert']
+  name string [note: 'a11y name（aria-label、label、文字內容）。沒有 name 的互動元素仍列出，值為空字串']
+  testid string [note: '對應 DOM data-testid。鍵永遠存在；沒有 data-testid 時為空字串。規格舉例：new-project、project-name、空字串']
+
+  Indexes {
+    (session_id, uid) [pk]
+  }
+
+  Note: '''
+  Page.elements 的一筆。overlay.js 走訪 DOM 時把 data-showme-uid 寫到元素上，show 靠它解析回真實 DOM。
+  收錄順序即 DOM 走訪順序；超過 150 的符合條件 node 不會出現在此表。
+  陳舊 snapshot# 的 uid 不在最新 Page.elements，show_step 為 uid_not_in_snapshot。
+  關聯：PageElement N:1 Page（session_id）
+  '''
+}
+
+Table Step {
+  session_id string [pk, note: '進行中的 show_step 所屬 session。規格未保存歷史步驟列表，只計 steps_shown']
+  uid string [note: '必須屬於最新 snapshot 的 page.elements']
+  instruction string [note: '第二人稱一句話。規格舉例：Click New Project、Type a project name']
+  kind string [note: 'click | input | select | observe。不屬於這四者時視為 observe。模型對完成判定唯一能決定的欄位']
+  step_index int [note: '目前步驟序。popover 顯示 Step k / N']
+  step_total int [note: '大綱總步數。popover 顯示 Step k / N']
+  expect_text string [note: 'kind = observe 時必填且不可為空；否則 show_step 操作失敗，error 為 expect_text_required。其他 kind 可為空']
+  timeout_s int [note: '等待完成訊號的秒數。預設 120；未傳、為 0 或負值時改用 120']
+
+  Note: '''
+  agent → ShowMe 的 show_step 參數（§9.2）。
+  跨屬性不變條件：
+  - uid 必須 ∈ 最新 Page 的 elements.uid
+  - kind = observe 時 expect_text 必須非空，並以該文字作為完成條件
+  - kind = click 時完成僅認：目標元素被移除或隱藏、URL 變更、或使用者按 Next
+  - kind = click 時不以 DOM mutation 次數作為完成條件，也不等待 HTTP response
+  - timeout_s 未傳、為 0 或負值時視為 120
+  - kind 不屬於 click、input、select、observe 時視為 observe，並適用 observe 的 expect_text 規則
+  - elapsed_s >= timeout_s 時 event 為 timeout（含剛好相等；同一瞬間完成訊號仍算 timeout）
+  關聯：Step 0..1:1 Session
+  '''
+}
+
+Table Event {
+  session_id string [note: '所屬 session']
+  ts long [note: '時間戳。規格舉例：1756400000']
+  kind string [note: 'overlay 只發：step_done | stuck | off_script。不含 timeout、pending']
+  signal string [note: '可為空。完成判定只看 kind／StepResult.event；signal 不列入驗收']
+  url string [note: '事件當下頁面 URL']
+
+  Indexes {
+    (session_id, ts) [pk]
+  }
+
+  Note: '''
+  overlay.js 經 window.__showme_emit 回報給 ShowMe（§9.4）。每步恰好一次。
+  主鍵為 (session_id, ts)。同一 session 同一 ts 後至的事件丟棄，只留第一筆。
+  Event.kind 與 StepResult.event 分開：overlay 只發 step_done、stuck、off_script；timeout 只存在 StepResult.event。MVP 不做 wait_for_user，故沒有 pending。
+  off_script 為 stretch：URL 變到當前步驟未預期的路徑，或目標元素在沒有完成訊號的情況下消失。
+  關聯：Event N:1 Session
+  '''
+}
+
+Table TutorialStart {
+  session_id string [note: '新建或重用的場次。url 無法開啟時可為空']
+  goal string [note: '與傳入 goal 相同，可為空字串']
+  next_action string [note: '給 agent 的下一步提示。規格舉例：Plan 3–8 steps in your head, then call show_step for the FIRST step using a uid from page.elements.']
+  error string [note: '失敗時的錯誤碼，成功時為空。url 無法開啟時為 navigation_failed']
+
+  Note: '''
+  start_tutorial 的回傳（非持久化）。另含嵌入的 Page。
+  失敗不丟例外，error 非空即操作失敗。
+  '''
+}
+
+Table StepResult {
+  event string [note: 'step_done | stuck | off_script | timeout。timeout 只在此欄，不由 overlay 發出。MVP 無 pending']
+  signal string [note: '可為空。完成判定只看 event；signal 不列入驗收']
+  elapsed_s float [note: '此步等待秒數。規格舉例：4.2']
+  next_action string [note: '給 agent 的下一步提示。規格舉例：If the goal is not yet achieved, call show_step for the next step using a uid from page.elements. If the page shows the goal is achieved, call end_tutorial.']
+  error string [note: '失敗時的錯誤碼，成功時為空。例如 uid_not_in_snapshot、session_not_found、max_steps_exceeded、expect_text_required、show_step_in_progress']
+
+  Note: '''
+  show_step 的回傳（非持久化）。另含嵌入的 Page。
+  失敗不丟例外，error 非空即操作失敗。
+  stuck：使用者按了 I'm stuck。
+  timeout：elapsed_s >= timeout_s 即 timeout（含剛好相等；未傳、0 或負值時 timeout_s 視為 120）。
+  timeout 由 server 在等待截止時寫入 StepResult.event，不是 overlay 的 Event.kind。
+  '''
+}
+
+Ref: Page.session_id - Session.session_id
+Ref: PageElement.session_id > Page.session_id
+Ref: Step.session_id - Session.session_id
+Ref: Event.session_id > Session.session_id
+Ref: TutorialStart.session_id - Session.session_id
