@@ -17,3 +17,11 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["showme"]
+
+[dependency-groups]
+dev = ["pytest>=8", "pytest-timeout>=2", "anyio>=4"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["browser: 會開真的瀏覽器（headless Chromium），用 -m 'not browser' 跳過"]
+timeout = 60
