@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Many Buttons</title>
+  </head>
+  <body>
+    <h1>Many Buttons</h1>
+    <div id="list"></div>
+    <script>
+      var list = document.getElementById("list");
+      for (var i = 1; i <= 151; i += 1) {
+        var button = document.createElement("button");
+        button.setAttribute("data-role", "button");
+        button.setAttribute("data-testid", "btn-" + i);
+        button.textContent = "Button " + i;
+        list.appendChild(button);
+      }
+    </script>
+  </body>
+</html>
