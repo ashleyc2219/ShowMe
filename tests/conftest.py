@@ -15,7 +15,13 @@ from pathlib import Path
 
 import pytest
 
+from fakes import FakeBrowser
+from showme.app import ShowMeApp
+
 PAGES_DIR = Path(__file__).parent / "fixtures" / "pages"
+
+DASHBOARD_URL = "http://localhost:3000/"
+NEW_PROJECT_URL = "http://localhost:3000/projects/new"
 
 
 @pytest.fixture
@@ -45,3 +51,51 @@ def static_server():
     finally:
         server.shutdown()
         server.server_close()
+
+
+@pytest.fixture
+def fake_browser() -> FakeBrowser:
+    """預先放好兩個假頁面：Dashboard 與 New Project。
+
+    元素只寫 role / name / testid；uid 由 FakeBrowser.snapshot(n) 依 n 重編。
+    """
+    browser = FakeBrowser()
+    browser.add_page(
+        DASHBOARD_URL,
+        "Dashboard",
+        [
+            {"role": "button", "name": "New Project", "testid": "new-project"},
+            {"role": "link", "name": "Settings", "testid": ""},
+        ],
+    )
+    browser.add_page(
+        NEW_PROJECT_URL,
+        "New Project",
+        [
+            {"role": "heading", "name": "New Project", "testid": ""},
+            {"role": "textbox", "name": "Project name", "testid": "project-name"},
+            {"role": "button", "name": "Create", "testid": "create"},
+        ],
+    )
+    return browser
+
+
+@pytest.fixture
+def app(fake_browser: FakeBrowser) -> ShowMeApp:
+    """一個用 FakeBrowser 的 ShowMeApp。factory 每次都回同一顆假瀏覽器，
+
+    所以測試可以直接對 fake_browser 下指令（emit / navigate），
+    也可以讀它的 calls。
+    """
+    return ShowMeApp(browser_factory=lambda: fake_browser)
+
+
+@pytest.fixture
+async def started(app: ShowMeApp, fake_browser: FakeBrowser):
+    """已經 start_tutorial 過的 (app, fake_browser, result)。
+
+    注意：A07 的 start_tutorial 還是佔位版本（回 {"error": "not_implemented"}），
+    所以這個 fixture 要到 A08 之後才真的有用。先建好，A08 起就直接拿來用。
+    """
+    result = await app.start_tutorial(DASHBOARD_URL, "create a project")
+    return app, fake_browser, result

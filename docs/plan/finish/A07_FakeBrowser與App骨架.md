@@ -253,12 +253,12 @@ class ShowMeApp:
     async def _ensure_browser(self) -> BrowserLike: ...
     def _on_emit(self, event: dict) -> None: ...
     async def _take_snapshot(self, session: Session) -> dict: ...
-    async def start_tutorial(self, url: str, goal: str) -> dict: ...              # A08、A09
-    async def inspect_page(self, session_id: str) -> dict: ...                    # A10
+    async def start_tutorial(self, url: str, goal: str) -> dict[str, object]: ...              # A08、A09
+    async def inspect_page(self, session_id: str) -> dict[str, object]: ...                    # A10
     async def show_step(self, session_id: str, uid: str, instruction: str, kind: str,
                         step_index: int, step_total: int, expect_text: str = "",
-                        timeout_s: float = DEFAULT_TIMEOUT_S) -> dict: ...        # A11、A12
-    async def end_tutorial(self, session_id: str, summary: str) -> dict: ...      # A13
+                        timeout_s: float = DEFAULT_TIMEOUT_S) -> dict[str, object]: ...        # A11、A12
+    async def end_tutorial(self, session_id: str, summary: str) -> dict[str, object]: ...      # A13
     async def shutdown(self) -> None: ...
 
 # showme/server.py
@@ -811,10 +811,10 @@ class ShowMeApp:
 
     # ---- 四個 MCP tool（A08–A13 逐一實作）----
 
-    async def start_tutorial(self, url: str, goal: str) -> dict:
+    async def start_tutorial(self, url: str, goal: str) -> dict[str, object]:
         return {"error": "not_implemented"}
 
-    async def inspect_page(self, session_id: str) -> dict:
+    async def inspect_page(self, session_id: str) -> dict[str, object]:
         return {"error": "not_implemented"}
 
     async def show_step(
@@ -827,10 +827,10 @@ class ShowMeApp:
         step_total: int,
         expect_text: str = "",
         timeout_s: float = DEFAULT_TIMEOUT_S,
-    ) -> dict:
+    ) -> dict[str, object]:
         return {"error": "not_implemented"}
 
-    async def end_tutorial(self, session_id: str, summary: str) -> dict:
+    async def end_tutorial(self, session_id: str, summary: str) -> dict[str, object]:
         return {"error": "not_implemented"}
 
     # ---- 收尾 ----
@@ -903,26 +903,26 @@ def set_app(app: ShowMeApp | None) -> None:   # 測試用：換成用 FakeBrowse
 
 
 @mcp.tool()
-async def start_tutorial(url: str, goal: str) -> dict:
+async def start_tutorial(url: str, goal: str) -> dict[str, object]:
     """Open the app in a headed browser, inject the overlay, start (or restart) the single tutorial session, and return the first condensed page snapshot (uids s1-*)."""
     return await get_app().start_tutorial(url, goal)
 
 
 @mcp.tool()
-async def inspect_page(session_id: str) -> dict:
+async def inspect_page(session_id: str) -> dict[str, object]:
     """Re-snapshot the current page (snapshot# +1) without drawing anything. Use it when a uid was rejected or the page changed."""
     return await get_app().inspect_page(session_id)
 
 
 @mcp.tool()
 async def show_step(session_id: str, uid: str, instruction: str, kind: str, step_index: int, step_total: int,
-                    expect_text: str = "", timeout_s: float = 120) -> dict:
+                    expect_text: str = "", timeout_s: float = 120) -> dict[str, object]:
     """Highlight one uid from the latest page and BLOCK until the user finishes the step (event=step_done), presses I'm stuck (stuck), or timeout_s elapses (timeout). Returns a fresh page. kind: click|input|select|observe (observe needs expect_text)."""
     return await get_app().show_step(session_id, uid, instruction, kind, step_index, step_total, expect_text, timeout_s)
 
 
 @mcp.tool()
-async def end_tutorial(session_id: str, summary: str) -> dict:
+async def end_tutorial(session_id: str, summary: str) -> dict[str, object]:
     """Clear the overlay, show the fixed done banner, and delete the session."""
     return await get_app().end_tutorial(session_id, summary)
 ```
@@ -935,6 +935,7 @@ async def end_tutorial(session_id: str, summary: str) -> dict:
 - `get_app()` 是 lazy 的：只有**真的呼叫 tool** 時才會建立 `ShowMeApp`（也才會在第一次用到時開瀏覽器）。所以 A01／A14 的「列出四個 tool」測試不會意外開一顆 Chrome。
 - `set_app()` 只給測試用（A14 的 `mcp_client` fixture 會 `set_app(app)` 塞一個用 `FakeBrowser` 的 app，結束再 `set_app(None)` 還原）。正式程式碼不要呼叫它。
 - `timeout_s: float = 120`（不是 `DEFAULT_TIMEOUT_S`）：這裡是**給模型看的 schema 預設值**，寫成字面數字比較直觀；`app.show_step` 那邊才用常數，兩邊值一樣。
+- **回傳註記一律寫 `-> dict[str, object]`，不能寫裸 `-> dict`。** mcp 2.1.1 是從回傳型別註記推導 output schema 的，沒有參數的裸 `dict` 推不出 schema，`structured_content` 會一直是 `None`（dict 內容只會以 JSON 字串塞在 `content[0].text`）。寫成 `dict[str, object]` 才會拿到**裸 dict**（不是包一層的 `{"result": ...}`）。這是 A01 的實測結論，對照表見 `docs/plan/report/2026-08-29-階段1_A01環境建置-REP.md`「遇到的問題與怎麼解決」第 1 點。`app.py` 的四個方法跟著用同樣註記，保持一致。
 
 ### Step 6：跑測試看它綠（5 分鐘）
 
