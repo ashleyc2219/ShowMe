@@ -14,9 +14,12 @@ from functools import partial
 from pathlib import Path
 
 import pytest
+from mcp import Client
 
 from fakes import FakeBrowser
 from showme.app import ShowMeApp
+from showme.server import mcp as server_mcp
+from showme.server import set_app
 
 PAGES_DIR = Path(__file__).parent / "fixtures" / "pages"
 
@@ -99,3 +102,20 @@ async def started(app: ShowMeApp, fake_browser: FakeBrowser):
     """
     result = await app.start_tutorial(DASHBOARD_URL, "create a project")
     return app, fake_browser, result
+
+
+@pytest.fixture
+async def mcp_client(app: ShowMeApp):
+    """一個連上 showme server 的 in-memory MCP client（A14）。
+
+    server.py 的 tool 走的是 module-level 的 get_app()，預設會 new 一個
+    用真 PlaywrightBrowser 的 ShowMeApp。這裡先用 set_app() 把它換成
+    上面的 `app` fixture（用 FakeBrowser），所以契約測試不會開瀏覽器。
+    測完再 set_app(None) 還原，免得污染其他測試。
+    """
+    set_app(app)
+    try:
+        async with Client(server_mcp) as client:
+            yield client
+    finally:
+        set_app(None)
