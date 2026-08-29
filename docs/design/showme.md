@@ -148,12 +148,19 @@ Happy path（demo：create a project）：
 
 1. 人在 Qoder 說要用 ShowMe 教 create a project。  
 2. Agent 呼叫 `start_tutorial(url, goal)` → Chrome 開頁、注入 overlay、回 `s1-*` snapshot。**clarified：** goal 可空。  
-3. Agent 心中拆 3–8 步，從 `page.elements` 挑 `uid`。  
-4. `show_step(...)`：驗證 uid → 畫 overlay → **阻塞**直到完成或 timeout → 回 `event` + 新 page（snapshot# +1）。  
-5. 重複 4，直到畫面看起來目標達成。  
+3. Agent **心中**有一條大綱（約 3–8 步，例如 New Project → 填名稱 → Create）。這不是 MCP 存的步驟表，也不是一開始就排好的 uid list。  
+4. 只從 **目前這份** `page.elements` 挑一個 `uid`，呼叫 `show_step`。驗證 uid → 畫 overlay → **阻塞**直到完成或 timeout → 回 `event` + **新 page**（snapshot# +1，uid 變成 `s2-*`）。  
+5. 大綱不變；**uid 必須重挑**。重複 4，直到畫面看起來目標達成。舊 snapshot 的 uid 不准再用。  
 6. `end_tutorial(session_id, summary)` → 清 overlay、固定 banner、刪 Session。**clarified：** summary 不進橫幅。
 
-`inspect_page`：READY 時重拍、不畫箭頭、snapshot# +1；用於 uid 失敗後再看或 agent 想重讀。
+兩層（**design**，給 agent 用法，不是新 tool）：
+
+| | 誰有 | 何時定 |
+|---|---|---|
+| 大綱 | 只在 Qoder 腦子裡 | `start` 後大致一次（目標路線） |
+| 這一小步的 uid / instruction | 每次 `show_step` 前 | 看最新 page 才選 |
+
+`inspect_page`：READY 時重拍、不畫箭頭、snapshot# +1；uid 對不上或頁變了就重看，不要死守第一張清單。
 
 覆蓋：場次還在時再 `start_tutorial` → 同 `session_id`、新 goal、重開 url、`steps_shown=0`、READY。**clarified**
 
