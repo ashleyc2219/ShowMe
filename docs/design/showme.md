@@ -3,7 +3,7 @@
 **狀態：** Draft（2026-08-29）  
 **觀眾：** 5 小時 hackathon 實作者與驗收測試撰寫者  
 **目的：** 把已釐清規格收成一份可拆切片、可寫測試的設計。本檔不是實作、不是 plan repo。  
-**目前 repo：** 只有 `docs/` 與 `.gitignore`。`showme/`、`overlay/`、`demo-app/` **尚未存在**；沒有 `pyproject.toml`、沒有測試、不能 `uv run`。
+**目前 repo：** 高階骨架已有 `pyproject.toml`、`showme/`、`overlay/overlay.js`。四個 tool 仍回 `not_implemented`。`demo-app/` 不在本 repo。尚未 `uv sync`／未接 Playwright。
 
 標記慣例：
 
@@ -84,21 +84,27 @@ ShowMe 是給 **Qoder Coding Agent** 用的 **stdio MCP server**。Agent 剛做�
 | 路徑 | 狀態 |
 |---|---|
 | `docs/spec/**` | 規格與 prompt 存在 |
-| `docs/design/` | 目錄空；本檔為第一份內容 |
+| `docs/design/showme.md` | Canonical design |
 | `docs/plan/` | 存在；`dev-prompts/phase0829.md` **不讀** |
-| `showme/`、`overlay/`、`demo-app/` | **不存在**（需從零建立） |
-| `pyproject.toml`、`package.json`、測試目錄 | **不存在** |
+| `showme/`、`overlay/overlay.js`、`pyproject.toml` | 高階骨架（tool body 仍 `not_implemented`） |
+| `demo-app/` | **不存在**（Qoder 產出，非本 repo MVP） |
 
-目標切分（design-draft §6.6，**規劃中**）：
+目標切分（design-draft §6.6 + 官方 MCP `uv` 專案：根目錄 `pyproject.toml`、stdio `mcp.run`）：
 
 ```text
 hackathonQoder/
-├── docs/spec/
-├── docs/design/showme.md     ← 本檔
-├── showme/                   MCP server（Python）— 尚未建立
-├── overlay/                  overlay.js + Driver.js — 尚未建立
-└── demo-app/                 :3000，活動前由 Qoder 產出，不是本 design 要實作的產品
+├── pyproject.toml            uv / mcp[cli] / playwright；script：showme
+├── showme/                   人員 A：MCPServer + 四 tool
+│   ├── __main__.py           python -m showme → stdio
+│   └── server.py
+├── overlay/                  人員 B：固定 overlay.js（非 AI 產生）
+│   └── overlay.js
+├── tests/                    後補
+├── docs/
+└── demo-app/                 不在本 repo 實作；活動前 Qoder 產出 :3000
 ```
+
+官方入門常用根目錄單一 `server.py`。本 repo 仍把 Python 放 `showme/`、JS 放 `overlay/`，對齊 A/B 目錄與 Playwright `add_init_script` 路徑。不採用 `src/`、不拆 tools/resources/prompts（四個 tool 不夠拆）。
 
 ---
 
