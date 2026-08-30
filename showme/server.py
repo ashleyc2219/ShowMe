@@ -18,6 +18,8 @@ INSTRUCTIONS = """You are TEACHING the user how to use the app; you never act fo
 - instruction: second person, one sentence, use the words visible on screen (e.g. "Click New Project").
 - If event is "stuck": call show_step again with the SAME uid and a plainer instruction.
 - If error is "uid_not_in_snapshot": re-pick a uid from the returned page.
+- expect_text (kind observe) must be text that appears ONLY AFTER the user finishes the step. Never use a label that is already on screen (e.g. the target's own name) — the step would finish instantly and look skipped.
+- File upload: there is no "upload" kind. Use kind "click" on the upload button and tell the user to choose a file, then press Next.
 - Call end_tutorial only when the page shows the goal is achieved.
 """
 
@@ -53,7 +55,7 @@ async def inspect_page(session_id: str) -> dict[str, object]:
 @mcp.tool()
 async def show_step(session_id: str, uid: str, instruction: str, kind: str, step_index: int, step_total: int,
                     expect_text: str = "", timeout_s: float = 120) -> dict[str, object]:
-    """Highlight one uid from the latest page and BLOCK until the user finishes the step (event=step_done), presses I'm stuck (stuck), or timeout_s elapses (timeout). Returns a fresh page. kind: click|input|select|observe (observe needs expect_text)."""
+    """Highlight one uid from the latest page and BLOCK until the user finishes the step (event=step_done), presses I'm stuck (stuck), or timeout_s elapses (timeout). Returns a fresh page. kind: click|input|select|observe (observe needs expect_text). expect_text must be text that appears ONLY AFTER the step is done — never a label already on screen (e.g. the button's own name), or the step completes instantly. File upload: use kind=click on the upload button and tell the user to press Next after choosing a file; there is no upload kind."""
     return await get_app().show_step(session_id, uid, instruction, kind, step_index, step_total, expect_text, timeout_s)
 
 

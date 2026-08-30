@@ -176,3 +176,25 @@ async def test_start_tutorial_through_the_mcp_layer(mcp_client):
     assert data["session_id"].startswith("s_")
     assert data["page"]["title"] == "Dashboard"
     assert all(el["uid"].startswith("s1-") for el in data["page"]["elements"])
+
+
+# --------------------------------------------------------------------------
+# expect_text 與檔案上傳的用法說明（finefoods 實測後補）
+# --------------------------------------------------------------------------
+# 2026-08-29 用 Qoder 在 finefoods「新增商品」實測：agent 教上傳圖片時用了
+# observe + expect_text="Upload Image"，但這串字就是那顆按鈕自己的標籤，overlay
+# 開始觀察的當下就在畫面上 → 0.15 秒 step_done，箭頭閃一下就消失，看起來像「跳過」。
+# description / instructions 是 agent 唯一看得到的說明，所以規則要寫在這兩處。
+
+async def test_show_step_description_explains_expect_text_and_file_upload(mcp_client):
+    tools = await _tools_by_name(mcp_client)
+    desc = tools["show_step"].description
+    assert "ONLY AFTER" in desc, "要講 expect_text 必須是做完這步才會出現的字"
+    assert "already on screen" in desc, "要講不能用畫面上已有的字（例如按鈕自己的名字）"
+    assert "kind=click" in desc and "Next" in desc, "檔案上傳：click 上傳鈕 + 選完檔案按 Next"
+
+
+async def test_server_instructions_cover_expect_text_and_file_upload():
+    assert "ONLY AFTER" in INSTRUCTIONS
+    assert "already on screen" in INSTRUCTIONS
+    assert "File upload" in INSTRUCTIONS and "Next" in INSTRUCTIONS
