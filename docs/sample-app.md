@@ -52,6 +52,11 @@ cd finefoods-antd
 #    降回 ^5.0.0 才裝得起來。之後若 refine 官方修掉這個版本鎖定，這步可以拿掉。
 sed -i '' 's/"\^5\.1\.0"/"^5.0.0"/g' package.json
 
+# 2b. 讓 dev server 固定開在 :3000
+#    vite 預設 port 是 5173，但 ShowMe 全專案（handoff.md、CLAUDE.md）都假設產品頁在 localhost:3000。
+#    refine dev 會把參數原樣轉給 vite，所以直接在 npm script 補 --port 3000。
+sed -i '' 's/"dev": "refine dev"/"dev": "refine dev --port 3000"/' package.json
+
 # 3. 安裝依賴
 #    --legacy-peer-deps：跳過 npm 對 peer dependency 衝突的嚴格檢查，
 #    對這個 example 目前的依賴狀態是必要的，不然 npm install 會直接中止。
