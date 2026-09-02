@@ -36,6 +36,9 @@ cd "$APP_DIR"
 echo "==> 修正 package.json 內鎖死的 peer dependency（^5.1.0 -> ^5.0.0）"
 sed -i '' 's/"\^5\.1\.0"/"^5.0.0"/g' package.json
 
+echo "==> 讓 dev server 固定開在 :3000（vite 預設 5173，但整個專案都假設 localhost:3000）"
+sed -i '' 's/"dev": "refine dev"/"dev": "refine dev --port 3000"/' package.json
+
 echo "==> npm install --legacy-peer-deps"
 npm install --legacy-peer-deps
 

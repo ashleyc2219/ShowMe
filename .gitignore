@@ -10,3 +10,11 @@ __pycache__/
 dist/
 *.egg-info/
 node_modules/
+
+# 本機 IDE / Claude Code MCP（含機器路徑，不進版控）
+.cursor/
+.mcp.json
+.DS_Store
+
+# 他課殘留的 agent prompt，不是 ShowMe 需求（見 CLAUDE.md、docs/design/showme.md）
+docs/plan/dev-prompts/
